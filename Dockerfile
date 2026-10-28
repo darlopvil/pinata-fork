@@ -28,7 +28,7 @@ ENV GOMEMLIMIT=15MiB \
     GOGC=20 \
     THC_PORT_NAME=THC_PORT \
     THC_PORT=8080 \
-    THC_PATH=/static/style.css
+    THC_PATH=/
 
 EXPOSE 8080
 

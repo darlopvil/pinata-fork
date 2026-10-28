@@ -319,9 +319,13 @@ const cssContent = `:root{--bg:#0b0f17;--muted:#94a3b8;--text:#e6e6ff;--accent:#
 
 // ---------- handlers ----------
 
-func styleHandler(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "text/css; charset=utf8")
-	_, _ = io.WriteString(w, cssContent)
+// pageHead returns the document head with the stylesheet inlined, plus the
+// per-user theme variables. Styles arrive with the first bytes of the page,
+// so nothing can be laid out unstyled while a separate stylesheet loads.
+func pageHead(r *http.Request, title string) string {
+	accent, imgScale := getThemeVars(r)
+	vars := fmt.Sprintf(`:root{--accent:%s;--accent-rgba:%s;--img-scale:%s;}`, html.EscapeString(accent), html.EscapeString(hexToRGBA(accent, 0.12)), html.EscapeString(imgScale))
+	return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>` + html.EscapeString(title) + `</title><style>` + cssContent + vars + `</style></head><body>`
 }
 
 // settings POST handler: sets accent color and image scale cookies
@@ -411,14 +415,12 @@ func useImageBackend() bool {
 
 // renderErrorPage writes a styled HTML error page with the given status code.
 func renderErrorPage(w http.ResponseWriter, r *http.Request, code int, msg string) {
-	accent, imgScale := getThemeVars(r)
-	inlineStyle := fmt.Sprintf(`<style>:root{--accent:%s;--accent-rgba:%s;--img-scale:%s;}</style>`, html.EscapeString(accent), html.EscapeString(hexToRGBA(accent, 0.12)), html.EscapeString(imgScale))
 	title := fmt.Sprintf("%d %s", code, http.StatusText(code))
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(code)
-	_, _ = io.WriteString(w, `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>`+html.EscapeString(title)+` - Pinata</title><link rel="stylesheet" href="/static/style.css">`+inlineStyle+`</head><body>`)
+	_, _ = io.WriteString(w, pageHead(r, title+" - Pinata"))
 	_, _ = io.WriteString(w, `<div class="header"><a class="brand" href="/">Pinata</a></div>`)
 	_, _ = io.WriteString(w, `<h2 style="margin:4px 0 8px 0;">`+html.EscapeString(title)+`</h2><p style="color:var(--muted);">`+html.EscapeString(msg)+`</p><p><a href="/">Back to search</a></p></body></html>`)
 }
@@ -466,12 +468,9 @@ func withErrorPages(mux *http.ServeMux) http.Handler {
 // Index (front) - server-rendered bookmarks and settings form (no JS)
 func indexHandler(w http.ResponseWriter, r *http.Request) {
 	accent, imgScale := getThemeVars(r)
-	// produce small inline style that overrides css vars
-	accentRgba := hexToRGBA(accent, 0.12)
-	inlineStyle := fmt.Sprintf(`<style>:root{--accent:%s;--accent-rgba:%s;--img-scale:%s;}</style>`, html.EscapeString(accent), html.EscapeString(accentRgba), html.EscapeString(imgScale))
 
 	w.Header().Set("Content-Type", "text/html; charset=utf8")
-	_, _ = io.WriteString(w, `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Pinata - Search</title><link rel="stylesheet" href="/static/style.css">`+inlineStyle+`</head><body>`)
+	_, _ = io.WriteString(w, pageHead(r, "Pinata - Search"))
 	_, _ = io.WriteString(w, `<div class="header"><a class="brand" href="/">Pinata</a><div class="search-box"></div></div>`)
 	_, _ = io.WriteString(w, `<div style="color:var(--muted); margin-bottom:12px;">Pinata is an alternate frontend to Pinterest with support for reverse image search, encrypted bookmarks, and image proxying! None of your data ever reaches Pinterest or their servers while using this frontend, and the instance owner can not ever see what you view or bookmarks.</div>`)
 	_, _ = io.WriteString(w, `<form class="search-block" method="get" action="/search"><input type="text" name="q" placeholder="Search Image" required maxlength="64"><button type="submit">Search</button></form>`)
@@ -588,14 +587,12 @@ func searchHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	accent, imgScale := getThemeVars(r)
+	_, imgScale := getThemeVars(r)
 	thumbMobile, thumbDesktop, thumbHigh := thumbWidths(imgScale)
-	accentRgba := hexToRGBA(accent, 0.12)
-	inlineStyle := fmt.Sprintf(`<style>:root{--accent:%s;--accent-rgba:%s;--img-scale:%s;}</style>`, html.EscapeString(accent), html.EscapeString(accentRgba), html.EscapeString(imgScale))
 
 	// Start streaming HTML
 	w.Header().Set("Content-Type", "text/html; charset=utf8")
-	_, _ = io.WriteString(w, `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>`+html.EscapeString(q)+` - Pinata</title><link rel="stylesheet" href="/static/style.css">`+inlineStyle+`</head><body>`)
+	_, _ = io.WriteString(w, pageHead(r, q+" - Pinata"))
 	// header: inline search and Save-search form
 	_, _ = io.WriteString(w, `<div class="header" style="margin-bottom:8px;"><a class="brand" href="/">Pinata</a><div class="search-box">`)
 	_, _ = io.WriteString(w, `<form class="search-inline" method="get" action="/search"><input type="text" name="q" value="`+html.EscapeString(q)+`" maxlength="64"><button type="submit">Search</button></form>`)
@@ -1155,7 +1152,6 @@ func bookmarksImportHandler(w http.ResponseWriter, r *http.Request) {
 // ---------- main ----------
 func main() {
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /static/style.css", styleHandler)
 	mux.HandleFunc("POST /settings", settingsPostHandler)
 	mux.HandleFunc("GET /{$}", indexHandler)
 	mux.HandleFunc("GET /search", searchHandler)
