@@ -1179,24 +1179,28 @@ func bookmarksImportHandler(w http.ResponseWriter, r *http.Request) {
 // ---------- main ----------
 func main() {
 	mux := http.NewServeMux()
-	mux.HandleFunc("/static/style.css", styleHandler)
-	mux.HandleFunc("/settings", settingsPostHandler)
-	mux.HandleFunc("/", indexHandler)
-	mux.HandleFunc("/search", searchHandler)
-	mux.HandleFunc("/image_proxy", imageProxyHandler)
-	mux.HandleFunc("/revsearch", revsearchHandler)
-	mux.HandleFunc("/thumb_proxy", thumbImageProxyHandler)
+	mux.HandleFunc("GET /static/style.css", styleHandler)
+	mux.HandleFunc("POST /settings", settingsPostHandler)
+	mux.HandleFunc("GET /{$}", indexHandler)
+	mux.HandleFunc("GET /search", searchHandler)
+	mux.HandleFunc("GET /image_proxy", imageProxyHandler)
+	mux.HandleFunc("GET /revsearch", revsearchHandler)
+	mux.HandleFunc("GET /thumb_proxy", thumbImageProxyHandler)
 
-	// bookmark endpoints
-	mux.HandleFunc("/bookmark", bookmarkPostHandler)
-	mux.HandleFunc("/bookmark_image", bookmarkImagePostHandler)
-	mux.HandleFunc("/bookmark_remove", bookmarkRemoveHandler)
-	mux.HandleFunc("/bookmarks/export", bookmarksExportHandler)
-	mux.HandleFunc("/bookmarks/import", bookmarksImportHandler)
+	// bookmark endpoints: anything that changes state is POST-only
+	mux.HandleFunc("POST /bookmark", bookmarkPostHandler)
+	mux.HandleFunc("POST /bookmark_image", bookmarkImagePostHandler)
+	mux.HandleFunc("POST /bookmark_remove", bookmarkRemoveHandler)
+	mux.HandleFunc("GET /bookmarks/export", bookmarksExportHandler)
+	mux.HandleFunc("POST /bookmarks/import", bookmarksImportHandler)
+
+	// Reject cross-origin browser requests with unsafe methods (CSRF),
+	// based on Sec-Fetch-Site with an Origin/Host fallback. Stateless: no tokens.
+	csrf := http.NewCrossOriginProtection()
 
 	server := &http.Server{
 		Addr:         ":8080",
-		Handler:      mux,
+		Handler:      csrf.Handler(mux),
 		ReadTimeout:  12 * time.Second,
 		WriteTimeout: 30 * time.Second,
 		IdleTimeout:  60 * time.Second,
