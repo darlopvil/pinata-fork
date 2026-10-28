@@ -1,4 +1,7 @@
+.git
 screenies
-.github
 LICENSE
 README.md
+compose.yml
+compose.example.yml
+.env

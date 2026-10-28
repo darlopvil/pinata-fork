@@ -1,16 +1,12 @@
 FROM codeberg.org/gigirassy/thc:latest AS thc
 
-FROM --platform=$BUILDPLATFORM kgrv/golang AS builder
+FROM --platform=$BUILDPLATFORM golang:1.26-alpine AS builder
 ARG TARGETOS
 ARG TARGETARCH
 
 WORKDIR /src
-COPY go.mod ./
-RUN apk add --no-cache ca-certificates git && go mod download
-RUN go env -w GOPROXY=direct
-
-
-COPY . .
+RUN apk add --no-cache ca-certificates
+COPY go.mod main.go ./
 
 RUN CGO_ENABLED=0 \
     GOOS=${TARGETOS:-linux} \

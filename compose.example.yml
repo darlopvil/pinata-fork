@@ -1,0 +1,33 @@
+# Example deployment. Copy it to compose.yml (git-ignored) and adjust it.
+services:
+  pinata:
+    build: .
+    container_name: pinata_app
+    restart: unless-stopped
+    # Reachable only from the host, for a reverse proxy running on it.
+    # If the proxy reaches the container over a Docker network, replace this with:
+    # expose:
+    #   - 8080
+    ports:
+      - "127.0.0.1:8080:8080"
+    environment:
+      # Enables encrypted bookmarks. Generate a key with: head -c 32 /dev/urandom | base64
+      # Leave empty to disable bookmarks.
+      - PINATA_BOOKMARK_KEY=
+      # Reverse image search links to TinEye. Set to 1 to hide it.
+      - PINATA_DISABLE_REVERSE=0
+      # Optional image proxy that recompresses images (pinata-proxy below).
+      # Remove this line and the pinata-proxy service to fetch images directly.
+      - PINATA_IMAGE_BACKEND=http://pinata-proxy:8081
+    networks:
+      - pinata
+
+  pinata-proxy:
+    image: codeberg.org/gigirassy/image-proxy:latest
+    container_name: pinata_proxy
+    restart: unless-stopped
+    networks:
+      - pinata
+
+networks:
+  pinata:

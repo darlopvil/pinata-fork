@@ -17,23 +17,19 @@ Despite being so light, Pinata supports bookmarks via cookies (encrypted!) and c
 
 ## How to run
 
+### Docker Compose (recommended)
+
+* Clone this repo: `git clone https://github.com/darlopvil/pinata-fork.git pinata && cd pinata`
+* Copy the example: `cp compose.example.yml compose.yml`. `compose.yml` is git-ignored, so your settings and key never get committed.
+* To enable bookmarks, set `PINATA_BOOKMARK_KEY` to the output of `head -c 32 /dev/urandom | base64`.
+* The image proxy is optional: remove the `pinata-proxy` service and `PINATA_IMAGE_BACKEND` to fetch images directly.
+* `docker compose up -d --build`
+* To update: `git pull && docker compose up -d --build`
+
 ### Go
 
-**currently not recommended.**
+Requires Go 1.26 or newer. Pinata listens on port 8080.
 
-Port 8080 is needed to run with this method; Docker is most recommended if that is taken.
-
-* Clone this repo.
-* (optional, but bookmarks will be unavailable) ``head -c 32 /dev/urandom | base64`` and then ``export PINATA_BOOKMARK_KEY=resultofpreviouscommand``.
-* ``go build -trimpath -ldflags="-s -w" -o pinata ./main.go``
-* Wait a few seconds for that tasty binary.
-* Run in background with ``./pinata &``
-
-### Compose (recommended)
-
-* Clone this repo **with submodules**. ``git clone https://codeberg.org/gigirassy/pinata/ --recurse-submodules``
-* Tweak ``compose.yml`` as you see fit and follow instructions if you want to enable bookmarks. This includes using the prebuilt image proxy image if your server can't handle heavy compiling with LTO, native optimizations, and all that...or
-* Comment out image proxy backend and PINATA_IMAGE_BACKEND environment variable if memory is a concern.
-* (cool bug facts: a custom-compiled image proxy can make image compression faster by up to 0.20 seconds!)
-* ``docker compose up -d``
-* ``docker compose pull && cd image-proxy && git pull && cd .. && docker compose up -d --build`` to update.
+* `go build -trimpath -ldflags="-s -w" -o pinata ./main.go`
+* (optional) `export PINATA_BOOKMARK_KEY=$(head -c 32 /dev/urandom | base64)` to enable bookmarks
+* `./pinata`
