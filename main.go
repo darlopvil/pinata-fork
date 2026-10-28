@@ -273,7 +273,22 @@ func clearBookmarksCookie(w http.ResponseWriter) {
 	http.SetCookie(w, c)
 }
 
-// ---------- theme helpers ----------
+// ---------- redirect helper ----------
+
+// safeNext returns next if it is a path on this site, or "/" otherwise, so
+// form "next" values can't redirect users to another site.
+func safeNext(next string) string {
+	// Backslashes are rejected anywhere: browsers treat them as "/", and
+	// http.Redirect's path cleaning can turn "/./\\x" into "/\\x" ("//x").
+	if next == "" || next[0] != '/' || strings.HasPrefix(next, "//") || strings.ContainsRune(next, '\\') {
+		return "/"
+	}
+	u, err := url.Parse(next)
+	if err != nil || u.Scheme != "" || u.Host != "" {
+		return "/"
+	}
+	return next
+}
 
 // validate and normalize a hex color; returns "#rrggbb" or empty string if invalid
 func normalizeHexColor(s string) string {
@@ -381,10 +396,7 @@ func settingsPostHandler(w http.ResponseWriter, r *http.Request) {
 		Path:   "/",
 		MaxAge: 60 * 60 * 24 * 365 * 5,
 	})
-	next := r.FormValue("next")
-	if next == "" {
-		next = "/"
-	}
+	next := safeNext(r.FormValue("next"))
 	http.Redirect(w, r, next, http.StatusSeeOther)
 }
 
@@ -999,10 +1011,7 @@ func bookmarkPostHandler(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/", http.StatusSeeOther)
 		return
 	}
-	next := r.FormValue("next")
-	if next == "" {
-		next = "/"
-	}
+	next := safeNext(r.FormValue("next"))
 	entries := readBookmarksFromReq(r)
 	new := []BookmarkEntry{{Type: "q", Value: q}}
 	for _, e := range entries {
@@ -1032,10 +1041,7 @@ func bookmarkImagePostHandler(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/", http.StatusSeeOther)
 		return
 	}
-	next := r.FormValue("next")
-	if next == "" {
-		next = "/"
-	}
+	next := safeNext(r.FormValue("next"))
 	entries := readBookmarksFromReq(r)
 	new := []BookmarkEntry{{Type: "img", Value: u}}
 	for _, e := range entries {
