@@ -2,10 +2,13 @@ package main
 
 import (
 	"bytes"
+	"compress/flate"
 	"context"
 	"crypto/aes"
 	"crypto/cipher"
+	"crypto/hmac"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -27,6 +30,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 )
 
 var httpClient = &http.Client{
@@ -67,6 +71,7 @@ var bookmarkKey []byte
 var bookmarkingEnabled bool
 var disableReverse bool
 var imageBackendBase string
+var pinLinkKey []byte
 
 const maxBookmarks = 30
 const maxItemLen = 256
@@ -98,6 +103,21 @@ func init() {
 	}
 
 	imageBackendBase = strings.TrimRight(strings.TrimSpace(os.Getenv("PINATA_IMAGE_BACKEND")), "/")
+
+	// Pin links from search results are signed (see signPinCard). With a
+	// bookmark key, derive a separate key from it so links survive restarts;
+	// without one, use a random key and links last until the next restart.
+	if bookmarkingEnabled {
+		m := hmac.New(sha256.New, bookmarkKey)
+		m.Write([]byte("pinata pin links v1"))
+		pinLinkKey = m.Sum(nil)
+	} else {
+		pinLinkKey = make([]byte, 32)
+		if _, err := rand.Read(pinLinkKey); err != nil {
+			log.Fatalf("can't generate the pin link key: %v", err)
+		}
+		log.Println("Pin links use a random key and stop working after a restart; set PINATA_BOOKMARK_KEY to keep them valid")
+	}
 }
 
 // ---------- encryption helpers (AES-GCM) ----------
@@ -369,10 +389,9 @@ func settingsPostHandler(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, next, http.StatusSeeOther)
 }
 
-func renderCardHTML(q, next, u, id string, thumbMobile, thumbDesktop, thumbHigh int) string {
-	href := "/image_proxy?url=" + url.QueryEscape(u)
-	if isPinID(id) {
-		href = "/pin/" + id
+func renderCardHTML(q, next, u, href string, thumbMobile, thumbDesktop, thumbHigh int) string {
+	if href == "" {
+		href = "/image_proxy?url=" + url.QueryEscape(u)
 	}
 	tm := thumbURL(u, thumbMobile)
 	td := thumbURL(u, thumbDesktop)
@@ -651,14 +670,7 @@ func searchHandler(w http.ResponseWriter, r *http.Request) {
 				// Fresh value per item: Decode leaves fields untouched when a
 				// key is missing or null, so a reused struct would carry the
 				// previous result's image over.
-				var rObj struct {
-					ID     string `json:"id"`
-					Images struct {
-						Orig struct {
-							URL string `json:"url"`
-						} `json:"orig"`
-					} `json:"images"`
-				}
+				var rObj searchResult
 				if err := dec.Decode(&rObj); err != nil {
 					log.Printf("error decoding result item: %v", err)
 					break
@@ -668,7 +680,7 @@ func searchHandler(w http.ResponseWriter, r *http.Request) {
 					continue
 				}
 				shown++
-				_, _ = io.WriteString(w, renderCardHTML(q, nextSearch, u, rObj.ID, thumbMobile, thumbDesktop, thumbHigh))
+				_, _ = io.WriteString(w, renderCardHTML(q, nextSearch, u, cardHref(&rObj), thumbMobile, thumbDesktop, thumbHigh))
 				if f, ok := w.(http.Flusher); ok {
 					f.Flush()
 				}
@@ -764,17 +776,222 @@ func firstNonEmpty(vals ...string) string {
 	return ""
 }
 
-// pinHandler serves /pin/{id}, also accepting Pinterest's "<slug>--<id>" form.
+// searchResult holds the fields of a search result that cards and pin pages use.
+type searchResult struct {
+	ID          string          `json:"id"`
+	Title       string          `json:"title"`
+	GridTitle   string          `json:"grid_title"`
+	Description string          `json:"description"`
+	AutoAltText string          `json:"auto_alt_text"`
+	SeoAltText  string          `json:"seo_alt_text"`
+	Domain      string          `json:"domain"`
+	CreatedAt   string          `json:"created_at"`
+	Videos      json.RawMessage `json:"videos"`
+	Images      struct {
+		Orig struct {
+			URL    string `json:"url"`
+			Width  int    `json:"width"`
+			Height int    `json:"height"`
+		} `json:"orig"`
+	} `json:"images"`
+	Pinner *struct {
+		Username string `json:"username"`
+		FullName string `json:"full_name"`
+	} `json:"pinner"`
+	Board *struct {
+		Name string `json:"name"`
+		URL  string `json:"url"`
+	} `json:"board"`
+	Aggregated *struct {
+		Stats struct {
+			Saves int `json:"saves"`
+		} `json:"aggregated_stats"`
+	} `json:"aggregated_pin_data"`
+}
+
+// pinCard is the compact copy of a search result carried in a signed pin link.
+type pinCard struct {
+	T string `json:"t,omitempty"` // title
+	D string `json:"d,omitempty"` // description
+	O string `json:"o"`           // original image URL
+	W int    `json:"w,omitempty"`
+	H int    `json:"h,omitempty"`
+	A string `json:"a,omitempty"` // alt text
+	M string `json:"m,omitempty"` // source domain
+	U string `json:"u,omitempty"` // pinner username
+	N string `json:"n,omitempty"` // pinner full name
+	B string `json:"b,omitempty"` // board name
+	C string `json:"c,omitempty"` // created_at
+	S int    `json:"s,omitempty"` // saves
+	V bool   `json:"v,omitempty"` // video pin
+}
+
+// pinView is everything the pin page renders, whatever the data source.
+type pinView struct {
+	Self       string // this page's path, for "next" after saving
+	Title      string
+	Desc       string
+	Orig       string
+	Width      int
+	Height     int
+	Alt        string
+	SourceURL  string // full source link (PinResource only)
+	Domain     string
+	PinnerUser string
+	PinnerName string
+	Board      string
+	CreatedAt  string
+	Saves      int
+	IsVideo    bool
+}
+
+// isOpaquePinID reports whether s looks like the opaque IDs ("e1_...") that
+// Pinterest gives logged-out clients in search results. PinResource can't
+// resolve them, so their pin pages are built from signed links instead.
+func isOpaquePinID(s string) bool {
+	if len(s) < 4 || len(s) > 128 {
+		return false
+	}
+	for _, c := range s {
+		if !(c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '_' || c == '-') {
+			return false
+		}
+	}
+	return true
+}
+
+func truncateRunes(s string, n int) string {
+	s = strings.TrimSpace(s)
+	if utf8.RuneCountInString(s) <= n {
+		return s
+	}
+	r := []rune(s)
+	return string(r[:n]) + "…"
+}
+
+func boardName(name, boardURL string) string {
+	if name != "" {
+		return name
+	}
+	parts := strings.Split(strings.Trim(boardURL, "/"), "/")
+	return parts[len(parts)-1]
+}
+
+func isPinimgURL(raw string) bool {
+	u, err := url.Parse(raw)
+	return err == nil && u.Scheme == "https" && strings.EqualFold(u.Hostname(), "i.pinimg.com")
+}
+
+func pinCardMAC(id, d string) string {
+	m := hmac.New(sha256.New, pinLinkKey)
+	m.Write([]byte(id))
+	m.Write([]byte{0})
+	m.Write([]byte(d))
+	return base64.RawURLEncoding.EncodeToString(m.Sum(nil)[:16])
+}
+
+// signPinCard returns the "d" (deflated JSON, base64url) and "s" (truncated
+// HMAC-SHA256 over the pin ID and d) parameters of a pin link, so pin pages
+// for opaque IDs need no request to Pinterest and can't be forged.
+func signPinCard(id string, c pinCard) (string, string, error) {
+	js, err := json.Marshal(c)
+	if err != nil {
+		return "", "", err
+	}
+	var buf bytes.Buffer
+	fw, err := flate.NewWriter(&buf, flate.BestCompression)
+	if err != nil {
+		return "", "", err
+	}
+	if _, err := fw.Write(js); err != nil {
+		return "", "", err
+	}
+	if err := fw.Close(); err != nil {
+		return "", "", err
+	}
+	d := base64.RawURLEncoding.EncodeToString(buf.Bytes())
+	return d, pinCardMAC(id, d), nil
+}
+
+// openPinCard verifies and decodes a signed pin link.
+func openPinCard(id, d, sig string) (pinCard, bool) {
+	var c pinCard
+	if d == "" || len(d) > 8192 || !hmac.Equal([]byte(pinCardMAC(id, d)), []byte(sig)) {
+		return c, false
+	}
+	raw, err := base64.RawURLEncoding.DecodeString(d)
+	if err != nil {
+		return c, false
+	}
+	js, err := io.ReadAll(io.LimitReader(flate.NewReader(bytes.NewReader(raw)), 64<<10))
+	if err != nil || json.Unmarshal(js, &c) != nil || !isPinimgURL(c.O) {
+		return c, false
+	}
+	return c, true
+}
+
+// cardHref returns the link for a search result card: its pin page, or ""
+// to fall back to the full-size image.
+func cardHref(r *searchResult) string {
+	if isPinID(r.ID) {
+		return "/pin/" + r.ID
+	}
+	if !isOpaquePinID(r.ID) || !isPinimgURL(r.Images.Orig.URL) {
+		return ""
+	}
+	c := pinCard{
+		T: truncateRunes(firstNonEmpty(r.Title, r.GridTitle), 200),
+		D: truncateRunes(r.Description, 500),
+		O: r.Images.Orig.URL,
+		W: r.Images.Orig.Width,
+		H: r.Images.Orig.Height,
+		A: truncateRunes(firstNonEmpty(r.AutoAltText, r.SeoAltText), 300),
+		M: r.Domain,
+		C: r.CreatedAt,
+		V: len(r.Videos) > 0 && string(r.Videos) != "null",
+	}
+	if r.Pinner != nil {
+		c.U, c.N = r.Pinner.Username, r.Pinner.FullName
+	}
+	if r.Board != nil {
+		c.B = boardName(r.Board.Name, r.Board.URL)
+	}
+	if r.Aggregated != nil {
+		c.S = r.Aggregated.Stats.Saves
+	}
+	d, sig, err := signPinCard(r.ID, c)
+	if err != nil {
+		return ""
+	}
+	return "/pin/" + r.ID + "?d=" + d + "&s=" + sig
+}
+
+// pinHandler serves /pin/{id}. Numeric IDs (also in Pinterest's
+// "<slug>--<id>" form) are fetched from PinResource; opaque IDs from search
+// results are rendered from their signed link.
 func pinHandler(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	if i := strings.LastIndex(id, "--"); i >= 0 {
 		id = id[i+2:]
 	}
-	if !isPinID(id) {
-		renderErrorPage(w, r, http.StatusNotFound, "That isn't a valid pin address.")
+	if isPinID(id) {
+		pinFromPinterest(w, r, id)
 		return
 	}
+	if isOpaquePinID(id) {
+		q := r.URL.Query()
+		if c, ok := openPinCard(id, q.Get("d"), q.Get("s")); ok {
+			renderPinPage(w, r, pinView{
+				Self: r.URL.RequestURI(), Title: c.T, Desc: c.D, Orig: c.O, Width: c.W, Height: c.H, Alt: c.A,
+				Domain: c.M, PinnerUser: c.U, PinnerName: c.N, Board: c.B, CreatedAt: c.C, Saves: c.S, IsVideo: c.V,
+			})
+			return
+		}
+	}
+	renderErrorPage(w, r, http.StatusNotFound, "That isn't a valid pin address.")
+}
 
+func pinFromPinterest(w http.ResponseWriter, r *http.Request, id string) {
 	data, _ := json.Marshal(map[string]any{"options": map[string]any{"id": id, "field_set_key": "detailed"}})
 	req, err := http.NewRequestWithContext(r.Context(), "GET", pinterestPinURL+"?data="+url.QueryEscape(string(data)), nil)
 	if err != nil {
@@ -810,25 +1027,45 @@ func pinHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	p := body.ResourceResponse.Data
 	orig := p.Images["orig"]
-	if orig.URL == "" {
+	if !isPinimgURL(orig.URL) {
 		renderErrorPage(w, r, http.StatusBadGateway, "This pin has no image Pinata can show.")
 		return
 	}
+	v := pinView{
+		Self: "/pin/" + id, Title: p.Title, Desc: firstNonEmpty(p.CloseupDescription, p.Description),
+		Orig: orig.URL, Width: orig.Width, Height: orig.Height, Alt: firstNonEmpty(p.AltText, p.AutoAltText),
+		SourceURL: p.Link, Domain: p.Domain, CreatedAt: p.CreatedAt, IsVideo: p.IsVideo,
+	}
+	if v.Title == "" {
+		v.Title = p.GridTitle
+	}
+	if p.Pinner != nil {
+		v.PinnerUser, v.PinnerName = p.Pinner.Username, p.Pinner.FullName
+	}
+	if p.Board != nil {
+		v.Board = boardName(p.Board.Name, p.Board.URL)
+	}
+	if p.Aggregated != nil {
+		v.Saves = p.Aggregated.Stats.Saves
+	}
+	renderPinPage(w, r, v)
+}
 
-	title := firstNonEmpty(p.Title, p.GridTitle, "Pin")
-	desc := firstNonEmpty(p.CloseupDescription, p.Description)
+func renderPinPage(w http.ResponseWriter, r *http.Request, v pinView) {
+	title := firstNonEmpty(v.Title, "Pin")
+	desc := strings.TrimSpace(v.Desc)
 	if strings.EqualFold(desc, title) {
 		desc = ""
 	}
-	alt := firstNonEmpty(p.AltText, p.AutoAltText, title)
-	full := "/image_proxy?url=" + url.QueryEscape(orig.URL)
+	alt := firstNonEmpty(v.Alt, title)
+	full := "/image_proxy?url=" + url.QueryEscape(v.Orig)
 
 	var b strings.Builder
 	b.WriteString(pageHead(r, title+" - Pinata"))
 	b.WriteString(`<div class="header"><a class="brand" href="/">Pinata</a><div class="search-box"><form class="search-inline" method="get" action="/search"><input type="text" name="q" placeholder="Search Image" required maxlength="64"><button type="submit">Search</button></form></div></div>`)
 	b.WriteString(`<div class="pin"><div class="pin-media"><a href="` + html.EscapeString(full) + `" target="_blank" rel="noreferrer"><img src="` + html.EscapeString(full) + `" alt="` + html.EscapeString(alt) + `"`)
-	if orig.Width > 0 && orig.Height > 0 {
-		b.WriteString(fmt.Sprintf(` width="%d" height="%d"`, orig.Width, orig.Height))
+	if v.Width > 0 && v.Height > 0 {
+		b.WriteString(fmt.Sprintf(` width="%d" height="%d"`, v.Width, v.Height))
 	}
 	b.WriteString(` decoding="async"></a></div><div class="pin-info"><h2>` + html.EscapeString(title) + `</h2>`)
 	if desc != "" {
@@ -836,45 +1073,40 @@ func pinHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	b.WriteString(`<div class="pin-meta">`)
-	if p.IsVideo {
+	if v.IsVideo {
 		b.WriteString(`<div>This is a video pin: Pinata shows its cover image, video playback isn't supported yet.</div>`)
 	}
-	if lu, err := url.Parse(p.Link); err == nil && (lu.Scheme == "http" || lu.Scheme == "https") && lu.Host != "" {
-		b.WriteString(`<div>Source: <a href="` + html.EscapeString(lu.String()) + `" target="_blank" rel="noreferrer noopener">` + html.EscapeString(firstNonEmpty(p.Domain, lu.Hostname())) + `</a></div>`)
+	if lu, err := url.Parse(v.SourceURL); err == nil && (lu.Scheme == "http" || lu.Scheme == "https") && lu.Host != "" {
+		b.WriteString(`<div>Source: <a href="` + html.EscapeString(lu.String()) + `" target="_blank" rel="noreferrer noopener">` + html.EscapeString(firstNonEmpty(v.Domain, lu.Hostname())) + `</a></div>`)
+	} else if v.Domain != "" {
+		b.WriteString(`<div>Source: ` + html.EscapeString(v.Domain) + `</div>`)
 	}
-	if p.Pinner != nil && p.Pinner.Username != "" {
-		who := html.EscapeString("@" + p.Pinner.Username)
-		if p.Pinner.FullName != "" {
-			who = html.EscapeString(p.Pinner.FullName) + " (" + who + ")"
+	if v.PinnerUser != "" {
+		who := html.EscapeString("@" + v.PinnerUser)
+		if v.PinnerName != "" {
+			who = html.EscapeString(v.PinnerName) + " (" + who + ")"
 		}
 		b.WriteString(`<div>Saved by ` + who + `</div>`)
 	}
-	if p.Board != nil {
-		name := p.Board.Name
-		if name == "" {
-			parts := strings.Split(strings.Trim(p.Board.URL, "/"), "/")
-			name = parts[len(parts)-1]
-		}
-		if name != "" {
-			b.WriteString(`<div>Board: ` + html.EscapeString(name) + `</div>`)
-		}
+	if v.Board != "" {
+		b.WriteString(`<div>Board: ` + html.EscapeString(v.Board) + `</div>`)
 	}
-	if t, err := time.Parse(time.RFC1123Z, p.CreatedAt); err == nil {
+	if t, err := time.Parse(time.RFC1123Z, v.CreatedAt); err == nil {
 		b.WriteString(`<div>Created ` + t.Format("2 Jan 2006") + `</div>`)
 	}
-	if p.Aggregated != nil && p.Aggregated.Stats.Saves > 0 {
+	if v.Saves > 0 {
 		saves := "saves"
-		if p.Aggregated.Stats.Saves == 1 {
+		if v.Saves == 1 {
 			saves = "save"
 		}
-		b.WriteString(fmt.Sprintf(`<div>%d %s</div>`, p.Aggregated.Stats.Saves, saves))
+		b.WriteString(fmt.Sprintf(`<div>%d %s</div>`, v.Saves, saves))
 	}
 	b.WriteString(`</div><div class="pin-actions">`)
 	if !disableReverse {
-		b.WriteString(`<a class="magnifier" href="/revsearch?b64=` + base64.StdEncoding.EncodeToString([]byte(orig.URL)) + `" title="Search Tineye" target="_blank">🔍</a>`)
+		b.WriteString(`<a class="magnifier" href="/revsearch?b64=` + base64.StdEncoding.EncodeToString([]byte(v.Orig)) + `" title="Search Tineye" target="_blank">🔍</a>`)
 	}
 	if bookmarkingEnabled {
-		b.WriteString(`<form method="post" action="/bookmark_image" style="display:inline;margin:0;"><input type="hidden" name="url" value="` + html.EscapeString(orig.URL) + `"><input type="hidden" name="next" value="/pin/` + id + `"><button class="btn-save-mini" type="submit" title="Save image">❤</button></form>`)
+		b.WriteString(`<form method="post" action="/bookmark_image" style="display:inline;margin:0;"><input type="hidden" name="url" value="` + html.EscapeString(v.Orig) + `"><input type="hidden" name="next" value="` + html.EscapeString(v.Self) + `"><button class="btn-save-mini" type="submit" title="Save image">❤</button></form>`)
 	}
 	b.WriteString(`<a class="btn-save" href="` + html.EscapeString(full) + `" target="_blank" rel="noreferrer" style="text-decoration:none;">Full size</a>`)
 	b.WriteString(`</div></div></div></body></html>`)
