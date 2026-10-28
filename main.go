@@ -23,7 +23,6 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -66,10 +65,7 @@ type BookmarkEntry struct {
 var bookmarkKey []byte
 var bookmarkingEnabled bool
 var disableReverse bool
-var chunkedMode bool
 var imageBackendBase string
-var chunkSize = 8
-var chunkWorkers = 4
 
 const maxBookmarks = 30
 const maxItemLen = 256
@@ -100,39 +96,6 @@ func init() {
 		disableReverse = false
 	}
 
-	// CHUNK enables chunked/threaded rendering of result cards.
-	// Examples:
-	//   CHUNK=0/false/no/off -> disabled
-	//   CHUNK=1/true/yes/on  -> enabled with default chunk size
-	//   CHUNK=12             -> enabled with 12-item batches
-	if raw := strings.TrimSpace(os.Getenv("CHUNK")); raw != "" {
-		switch strings.ToLower(raw) {
-		case "0", "false", "no", "off":
-			chunkedMode = false
-		default:
-			chunkedMode = true
-			if n, err := strconv.Atoi(raw); err == nil && n > 0 {
-				chunkSize = n
-			}
-		}
-	}
-	if chunkSize < 4 {
-		chunkSize = 4
-	}
-	if chunkSize > 16 {
-		chunkSize = 16
-	}
-	cpus := runtime.GOMAXPROCS(0)
-	if cpus < 1 {
-		cpus = 1
-	}
-	if cpus > 4 {
-		cpus = 4
-	}
-	chunkWorkers = cpus
-	if chunkedMode {
-		log.Printf("Chunked mode enabled: chunkSize=%d workers=%d", chunkSize, chunkWorkers)
-	}
 	imageBackendBase = strings.TrimRight(strings.TrimSpace(os.Getenv("PINATA_IMAGE_BACKEND")), "/")
 }
 
@@ -440,70 +403,6 @@ func renderCardHTML(q, next, u string, thumbMobile, thumbDesktop, thumbHigh int)
 	return b.String()
 }
 
-func writeChunkedCards(w http.ResponseWriter, q, next string, urls []string, thumbMobile, thumbDesktop, thumbHigh int) {
-	if len(urls) == 0 {
-		return
-	}
-	if !chunkedMode || len(urls) == 1 {
-		for _, u := range urls {
-			_, _ = io.WriteString(w, renderCardHTML(q, next, u, thumbMobile, thumbDesktop, thumbHigh))
-		}
-		if f, ok := w.(http.Flusher); ok {
-			f.Flush()
-		}
-		return
-	}
-
-	type job struct {
-		idx int
-		u   string
-	}
-	type result struct {
-		idx  int
-		html string
-	}
-
-	jobs := make(chan job, len(urls))
-	results := make(chan result, len(urls))
-
-	workers := chunkWorkers
-	if workers > len(urls) {
-		workers = len(urls)
-	}
-	var wg sync.WaitGroup
-	wg.Add(workers)
-	for i := 0; i < workers; i++ {
-		go func() {
-			defer wg.Done()
-			for j := range jobs {
-				results <- result{idx: j.idx, html: renderCardHTML(q, next, j.u, thumbMobile, thumbDesktop, thumbHigh)}
-			}
-		}()
-	}
-
-	for i, u := range urls {
-		jobs <- job{idx: i, u: u}
-	}
-	close(jobs)
-
-	go func() {
-		wg.Wait()
-		close(results)
-	}()
-
-	out := make([]string, len(urls))
-	for r := range results {
-		out[r.idx] = r.html
-	}
-	for _, s := range out {
-		_, _ = io.WriteString(w, s)
-	}
-	if f, ok := w.(http.Flusher); ok {
-		f.Flush()
-	}
-}
-
-
 func useImageBackend() bool {
 	return imageBackendBase != ""
 }
@@ -711,7 +610,6 @@ func searchHandler(w http.ResponseWriter, r *http.Request) {
 	dec := json.NewDecoder(resp.Body)
 	var nextBookmark string
 	nextSearch := "/search?q=" + url.QueryEscape(q)
-	chunk := make([]string, 0, chunkSize)
 	shown := 0
 
 	for {
@@ -737,14 +635,17 @@ func searchHandler(w http.ResponseWriter, r *http.Request) {
 			if delim, ok := tk2.(json.Delim); !ok || delim != '[' {
 				continue
 			}
-			var rObj struct {
-				Images struct {
-					Orig struct {
-						URL string `json:"url"`
-					} `json:"orig"`
-				} `json:"images"`
-			}
 			for dec.More() {
+				// Fresh value per item: Decode leaves fields untouched when a
+				// key is missing or null, so a reused struct would carry the
+				// previous result's image over.
+				var rObj struct {
+					Images struct {
+						Orig struct {
+							URL string `json:"url"`
+						} `json:"orig"`
+					} `json:"images"`
+				}
 				if err := dec.Decode(&rObj); err != nil {
 					log.Printf("error decoding result item: %v", err)
 					break
@@ -754,17 +655,9 @@ func searchHandler(w http.ResponseWriter, r *http.Request) {
 					continue
 				}
 				shown++
-				if chunkedMode {
-					chunk = append(chunk, u)
-					if len(chunk) >= chunkSize {
-						writeChunkedCards(w, q, nextSearch, chunk, thumbMobile, thumbDesktop, thumbHigh)
-						chunk = chunk[:0]
-					}
-				} else {
-					_, _ = io.WriteString(w, renderCardHTML(q, nextSearch, u, thumbMobile, thumbDesktop, thumbHigh))
-					if f, ok := w.(http.Flusher); ok {
-						f.Flush()
-					}
+				_, _ = io.WriteString(w, renderCardHTML(q, nextSearch, u, thumbMobile, thumbDesktop, thumbHigh))
+				if f, ok := w.(http.Flusher); ok {
+					f.Flush()
 				}
 			}
 			_, _ = dec.Token()
@@ -778,10 +671,6 @@ func searchHandler(w http.ResponseWriter, r *http.Request) {
 		default:
 			continue
 		}
-	}
-
-	if chunkedMode && len(chunk) > 0 {
-		writeChunkedCards(w, q, nextSearch, chunk, thumbMobile, thumbDesktop, thumbHigh)
 	}
 
 	_, _ = io.WriteString(w, `</div>`)
