@@ -54,6 +54,7 @@ var copyBufPool = sync.Pool{
 }
 
 const pinterestSearchURL = "https://www.pinterest.com/resource/BaseSearchResource/get/"
+const pinterestPinURL = "https://www.pinterest.com/resource/PinResource/get/"
 const cookieName = "pinata_bm"
 
 // ---------- bookmarks types / config ----------
@@ -315,7 +316,7 @@ func getThemeVars(r *http.Request) (string, string) {
 }
 
 // ---------- CSS (uses CSS vars; defaults are present but overridden per-request via inline style) ----------
-const cssContent = `:root{--bg:#0b0f17;--muted:#94a3b8;--text:#e6e6ff;--accent:#7c3aed;--accent-rgba:rgba(124,58,237,0.12);--img-scale:1}*{box-sizing:border-box}html,body{height:100%}body{margin:0;padding:20px;background:linear-gradient(180deg,#071020 0%,var(--bg) 100%);color:var(--text);font-family:ui-monospace,Menlo,Monaco,monospace}a{color:inherit}.header{display:flex;gap:12px;align-items:center;margin-bottom:18px;flex-wrap:wrap}.brand{font-size:20px;font-weight:700;color:var(--accent);text-decoration:none}.search-box{margin-left:auto;display:flex;gap:8px;align-items:center;flex:0 1 auto}.search-block{width:100%;display:flex;gap:8px;margin-top:14px}.search-inline{display:flex;gap:8px;align-items:center;min-width:0}input[type="text"]{background:transparent;border:1px solid rgba(255,255,255,0.06);padding:8px 12px;color:var(--text);min-width:120px;border-radius:8px;outline:none}button[type="submit"],.btn-save{background:linear-gradient(90deg,var(--accent),#5b21b6);color:white;border:none;padding:8px 12px;border-radius:8px;cursor:pointer}.btn-save{font-weight:600}.img-container{column-width:calc(260px * var(--img-scale));column-gap:16px;width:100%;max-width:1400px;margin-top:18px}.card{display:inline-block;width:100%;margin:0 0 16px;border-radius:10px;overflow:hidden;background:linear-gradient(180deg,rgba(255,255,255,0.01),rgba(255,255,255,0.02));box-shadow:0 6px 18px rgba(3,7,18,0.6);border:1px solid rgba(124,58,237,0.06);break-inside:avoid;-webkit-column-break-inside:avoid;-moz-column-break-inside:avoid;min-height:0;position:relative}.card img{display:block;width:100%;height:auto;object-fit:cover;background:#08101a}.card-controls{position:absolute;top:8px;right:8px;display:flex;gap:8px;align-items:center}.btn-save-mini{background:rgba(0,0,0,0.45);border:1px solid rgba(255,255,255,0.06);color:var(--text);padding:6px;border-radius:999px;cursor:pointer;font-weight:700;display:inline-flex;align-items:center;justify-content:center;width:34px;height:34px;text-decoration:none}.magnifier{background:rgba(0,0,0,0.45);border:1px solid rgba(255,255,255,0.06);color:var(--text);padding:6px;border-radius:999px;font-size:14px;width:34px;height:34px;display:inline-flex;align-items:center;justify-content:center;text-decoration:none}.bookmarks{margin-left:12px;color:var(--muted);font-size:14px}.bookmark-list{margin-top:10px;display:flex;gap:8px;flex-wrap:wrap}.bookmark-pill{background:rgba(255,255,255,0.03);padding:6px 8px;border-radius:999px;border:1px solid rgba(255,255,255,0.04);font-size:13px;display:flex;gap:6px;align-items:center}.bookmark-pill form{display:inline}.bookmark-remove-btn{background:transparent;border:none;color:#ff7b7b;font-weight:700;cursor:pointer;padding:0 6px}.export-form{margin-top:12px;display:flex;gap:8px;align-items:center}.pagination{text-align:center;margin:26px 0}.pagination a{color:var(--accent);text-decoration:none;padding:8px 12px;border-radius:8px;border:1px solid rgba(124,58,237,0.12);background:rgba(124,58,237,0.02)}.footer-note{color:var(--muted);font-size:12px;margin-top:22px}@media (max-width:640px){body{padding:12px;font-size:18px}.brand{font-size:22px}input[type="text"]{min-width:120px;padding:12px 14px;font-size:16px}button[type="submit"],.btn-save{padding:10px 14px;font-size:16px;border-radius:10px}.img-container{column-width:calc(180px * var(--img-scale));column-gap:12px}.search-block{gap:10px;flex-direction:column}.search-inline{width:100%}.search-box{margin-left:0;width:100%}.bookmarks{order:3;width:100%;margin-top:8px}}`
+const cssContent = `:root{--bg:#0b0f17;--muted:#94a3b8;--text:#e6e6ff;--accent:#7c3aed;--accent-rgba:rgba(124,58,237,0.12);--img-scale:1}*{box-sizing:border-box}html,body{height:100%}body{margin:0;padding:20px;background:linear-gradient(180deg,#071020 0%,var(--bg) 100%);color:var(--text);font-family:ui-monospace,Menlo,Monaco,monospace}a{color:inherit}.header{display:flex;gap:12px;align-items:center;margin-bottom:18px;flex-wrap:wrap}.brand{font-size:20px;font-weight:700;color:var(--accent);text-decoration:none}.search-box{margin-left:auto;display:flex;gap:8px;align-items:center;flex:0 1 auto}.search-block{width:100%;display:flex;gap:8px;margin-top:14px}.search-inline{display:flex;gap:8px;align-items:center;min-width:0}input[type="text"]{background:transparent;border:1px solid rgba(255,255,255,0.06);padding:8px 12px;color:var(--text);min-width:120px;border-radius:8px;outline:none}button[type="submit"],.btn-save{background:linear-gradient(90deg,var(--accent),#5b21b6);color:white;border:none;padding:8px 12px;border-radius:8px;cursor:pointer}.btn-save{font-weight:600}.img-container{column-width:calc(260px * var(--img-scale));column-gap:16px;width:100%;max-width:1400px;margin-top:18px}.card{display:inline-block;width:100%;margin:0 0 16px;border-radius:10px;overflow:hidden;background:linear-gradient(180deg,rgba(255,255,255,0.01),rgba(255,255,255,0.02));box-shadow:0 6px 18px rgba(3,7,18,0.6);border:1px solid rgba(124,58,237,0.06);break-inside:avoid;-webkit-column-break-inside:avoid;-moz-column-break-inside:avoid;min-height:0;position:relative}.card img{display:block;width:100%;height:auto;object-fit:cover;background:#08101a}.card-controls{position:absolute;top:8px;right:8px;display:flex;gap:8px;align-items:center}.btn-save-mini{background:rgba(0,0,0,0.45);border:1px solid rgba(255,255,255,0.06);color:var(--text);padding:6px;border-radius:999px;cursor:pointer;font-weight:700;display:inline-flex;align-items:center;justify-content:center;width:34px;height:34px;text-decoration:none}.magnifier{background:rgba(0,0,0,0.45);border:1px solid rgba(255,255,255,0.06);color:var(--text);padding:6px;border-radius:999px;font-size:14px;width:34px;height:34px;display:inline-flex;align-items:center;justify-content:center;text-decoration:none}.bookmarks{margin-left:12px;color:var(--muted);font-size:14px}.bookmark-list{margin-top:10px;display:flex;gap:8px;flex-wrap:wrap}.bookmark-pill{background:rgba(255,255,255,0.03);padding:6px 8px;border-radius:999px;border:1px solid rgba(255,255,255,0.04);font-size:13px;display:flex;gap:6px;align-items:center}.bookmark-pill form{display:inline}.bookmark-remove-btn{background:transparent;border:none;color:#ff7b7b;font-weight:700;cursor:pointer;padding:0 6px}.export-form{margin-top:12px;display:flex;gap:8px;align-items:center}.pagination{text-align:center;margin:26px 0}.pagination a{color:var(--accent);text-decoration:none;padding:8px 12px;border-radius:8px;border:1px solid rgba(124,58,237,0.12);background:rgba(124,58,237,0.02)}.footer-note{color:var(--muted);font-size:12px;margin-top:22px}.pin{display:flex;gap:24px;align-items:flex-start;flex-wrap:wrap;margin-top:18px}.pin-media{flex:0 1 auto;max-width:100%}.pin-media img{display:block;max-width:100%;width:auto;height:auto;border-radius:10px;background:#08101a}@media (min-width:641px){.pin-media img{max-height:85vh}}.pin-info{flex:1 1 280px;max-width:560px}.pin-info h2{margin:0 0 10px}.pin-desc{white-space:pre-line;margin:0 0 12px}.pin-meta{color:var(--muted);font-size:14px;line-height:1.7;margin:0 0 12px}.pin-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap}@media (max-width:640px){body{padding:12px;font-size:18px}.brand{font-size:22px}input[type="text"]{min-width:120px;padding:12px 14px;font-size:16px}button[type="submit"],.btn-save{padding:10px 14px;font-size:16px;border-radius:10px}.img-container{column-width:calc(180px * var(--img-scale));column-gap:12px}.search-block{gap:10px;flex-direction:column}.search-inline{width:100%}.search-box{margin-left:0;width:100%}.bookmarks{order:3;width:100%;margin-top:8px}}`
 
 // ---------- handlers ----------
 
@@ -368,8 +369,11 @@ func settingsPostHandler(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, next, http.StatusSeeOther)
 }
 
-func renderCardHTML(q, next, u string, thumbMobile, thumbDesktop, thumbHigh int) string {
-	full := "/image_proxy?url=" + url.QueryEscape(u)
+func renderCardHTML(q, next, u, id string, thumbMobile, thumbDesktop, thumbHigh int) string {
+	href := "/image_proxy?url=" + url.QueryEscape(u)
+	if isPinID(id) {
+		href = "/pin/" + id
+	}
 	tm := thumbURL(u, thumbMobile)
 	td := thumbURL(u, thumbDesktop)
 	th := thumbURL(u, thumbHigh)
@@ -381,7 +385,7 @@ func renderCardHTML(q, next, u string, thumbMobile, thumbDesktop, thumbHigh int)
 	b.Grow(len(u)*2 + 768)
 	b.WriteString(`<div class="card">`)
 	b.WriteString(`<a href="`)
-	b.WriteString(html.EscapeString(full))
+	b.WriteString(html.EscapeString(href))
 	b.WriteString(`" style="display:block;" target="_blank" rel="noreferrer"><img loading="lazy" decoding="async" src="`)
 	b.WriteString(html.EscapeString(td))
 	b.WriteString(`" srcset="`)
@@ -423,6 +427,31 @@ func renderErrorPage(w http.ResponseWriter, r *http.Request, code int, msg strin
 	_, _ = io.WriteString(w, pageHead(r, title+" - Pinata"))
 	_, _ = io.WriteString(w, `<div class="header"><a class="brand" href="/">Pinata</a></div>`)
 	_, _ = io.WriteString(w, `<h2 style="margin:4px 0 8px 0;">`+html.EscapeString(title)+`</h2><p style="color:var(--muted);">`+html.EscapeString(msg)+`</p><p><a href="/">Back to search</a></p></body></html>`)
+}
+
+// renderFetchError logs a failed Pinterest request and renders a 502. Only the
+// inner error is logged: url.Error carries the request URL, which holds the
+// user's query.
+func renderFetchError(w http.ResponseWriter, r *http.Request, what string, err error) {
+	var uerr *url.Error
+	if errors.As(err, &uerr) {
+		err = uerr.Err
+	}
+	log.Printf("pinterest %s: request failed: %v", what, err)
+	renderErrorPage(w, r, http.StatusBadGateway, "Couldn't reach Pinterest. Try again in a moment.")
+}
+
+// renderUpstreamError renders the error page for a non-2xx Pinterest response.
+func renderUpstreamError(w http.ResponseWriter, r *http.Request, what string, resp *http.Response) {
+	log.Printf("pinterest %s: upstream status %d", what, resp.StatusCode)
+	if resp.StatusCode == http.StatusTooManyRequests {
+		if ra := resp.Header.Get("Retry-After"); ra != "" {
+			w.Header().Set("Retry-After", ra)
+		}
+		renderErrorPage(w, r, http.StatusServiceUnavailable, "Pinterest is rate-limiting this instance (HTTP 429). Try again later.")
+		return
+	}
+	renderErrorPage(w, r, http.StatusBadGateway, fmt.Sprintf("Pinterest returned an error (HTTP %d). Try again later.", resp.StatusCode))
 }
 
 // errorPageWriter replaces the mux's plain-text 404/405 bodies with the
@@ -555,27 +584,13 @@ func searchHandler(w http.ResponseWriter, r *http.Request) {
 
 	resp, err := httpClient.Do(req)
 	if err != nil {
-		// Log the cause without the URL: it carries the user's query.
-		var uerr *url.Error
-		if errors.As(err, &uerr) {
-			err = uerr.Err
-		}
-		log.Printf("pinterest search: request failed: %v", err)
-		renderErrorPage(w, r, http.StatusBadGateway, "Couldn't reach Pinterest. Try again in a moment.")
+		renderFetchError(w, r, "search", err)
 		return
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
-		log.Printf("pinterest search: upstream status %d", resp.StatusCode)
-		if resp.StatusCode == http.StatusTooManyRequests {
-			if ra := resp.Header.Get("Retry-After"); ra != "" {
-				w.Header().Set("Retry-After", ra)
-			}
-			renderErrorPage(w, r, http.StatusServiceUnavailable, "Pinterest is rate-limiting this instance (HTTP 429). Try again later.")
-			return
-		}
-		renderErrorPage(w, r, http.StatusBadGateway, fmt.Sprintf("Pinterest returned an error (HTTP %d). Try again later.", resp.StatusCode))
+		renderUpstreamError(w, r, "search", resp)
 		return
 	}
 
@@ -637,6 +652,7 @@ func searchHandler(w http.ResponseWriter, r *http.Request) {
 				// key is missing or null, so a reused struct would carry the
 				// previous result's image over.
 				var rObj struct {
+					ID     string `json:"id"`
 					Images struct {
 						Orig struct {
 							URL string `json:"url"`
@@ -652,7 +668,7 @@ func searchHandler(w http.ResponseWriter, r *http.Request) {
 					continue
 				}
 				shown++
-				_, _ = io.WriteString(w, renderCardHTML(q, nextSearch, u, thumbMobile, thumbDesktop, thumbHigh))
+				_, _ = io.WriteString(w, renderCardHTML(q, nextSearch, u, rObj.ID, thumbMobile, thumbDesktop, thumbHigh))
 				if f, ok := w.(http.Flusher); ok {
 					f.Flush()
 				}
@@ -687,6 +703,184 @@ func searchHandler(w http.ResponseWriter, r *http.Request) {
 		_, _ = io.WriteString(w, `<div class="pagination"><a href="`+html.EscapeString(next)+`">Next page</a></div>`)
 	}
 	_, _ = io.WriteString(w, `<div class="footer-note">Powered by Pinata • Reverse image search uses Tineye • <a href="https://codeberg.org/gigirassy/pinata/">Contribute to this code or host your own instance!</a></div></body></html>`)
+}
+
+// ---------- pin page ----------
+
+// pinData holds the PinResource fields the pin page uses.
+type pinData struct {
+	ID                 string `json:"id"`
+	Title              string `json:"title"`
+	GridTitle          string `json:"grid_title"`
+	Description        string `json:"description"`
+	CloseupDescription string `json:"closeup_unified_description"`
+	AltText            string `json:"alt_text"`
+	AutoAltText        string `json:"auto_alt_text"`
+	Link               string `json:"link"`
+	Domain             string `json:"domain"`
+	CreatedAt          string `json:"created_at"`
+	IsVideo            bool   `json:"is_video"`
+	Images             map[string]struct {
+		URL    string `json:"url"`
+		Width  int    `json:"width"`
+		Height int    `json:"height"`
+	} `json:"images"`
+	Pinner *struct {
+		Username string `json:"username"`
+		FullName string `json:"full_name"`
+	} `json:"pinner"`
+	Board *struct {
+		Name string `json:"name"`
+		URL  string `json:"url"`
+	} `json:"board"`
+	Aggregated *struct {
+		Stats struct {
+			Saves int `json:"saves"`
+		} `json:"aggregated_stats"`
+	} `json:"aggregated_pin_data"`
+}
+
+// isPinID reports whether s is a numeric pin ID. Some search results carry
+// opaque IDs (e.g. "e1_...") that PinResource answers with 404, so those
+// cards keep linking to the image instead.
+func isPinID(s string) bool {
+	if s == "" || len(s) > 20 {
+		return false
+	}
+	for _, c := range s {
+		if c < '0' || c > '9' {
+			return false
+		}
+	}
+	return true
+}
+
+func firstNonEmpty(vals ...string) string {
+	for _, v := range vals {
+		if v = strings.TrimSpace(v); v != "" {
+			return v
+		}
+	}
+	return ""
+}
+
+// pinHandler serves /pin/{id}, also accepting Pinterest's "<slug>--<id>" form.
+func pinHandler(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if i := strings.LastIndex(id, "--"); i >= 0 {
+		id = id[i+2:]
+	}
+	if !isPinID(id) {
+		renderErrorPage(w, r, http.StatusNotFound, "That isn't a valid pin address.")
+		return
+	}
+
+	data, _ := json.Marshal(map[string]any{"options": map[string]any{"id": id, "field_set_key": "detailed"}})
+	req, err := http.NewRequestWithContext(r.Context(), "GET", pinterestPinURL+"?data="+url.QueryEscape(string(data)), nil)
+	if err != nil {
+		renderErrorPage(w, r, http.StatusInternalServerError, "Couldn't build the request to Pinterest.")
+		return
+	}
+	req.Header.Set("x-pinterest-pws-handler", "www/pin/[id].js")
+
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		renderFetchError(w, r, "pin", err)
+		return
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusNotFound {
+		renderErrorPage(w, r, http.StatusNotFound, "This pin doesn't exist or was deleted.")
+		return
+	}
+	if resp.StatusCode < 200 || resp.StatusCode > 299 {
+		renderUpstreamError(w, r, "pin", resp)
+		return
+	}
+
+	var body struct {
+		ResourceResponse struct {
+			Data *pinData `json:"data"`
+		} `json:"resource_response"`
+	}
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 4<<20)).Decode(&body); err != nil || body.ResourceResponse.Data == nil {
+		log.Printf("pinterest pin: unreadable response (decode error: %v)", err)
+		renderErrorPage(w, r, http.StatusBadGateway, "Pinterest sent a response Pinata couldn't read.")
+		return
+	}
+	p := body.ResourceResponse.Data
+	orig := p.Images["orig"]
+	if orig.URL == "" {
+		renderErrorPage(w, r, http.StatusBadGateway, "This pin has no image Pinata can show.")
+		return
+	}
+
+	title := firstNonEmpty(p.Title, p.GridTitle, "Pin")
+	desc := firstNonEmpty(p.CloseupDescription, p.Description)
+	if strings.EqualFold(desc, title) {
+		desc = ""
+	}
+	alt := firstNonEmpty(p.AltText, p.AutoAltText, title)
+	full := "/image_proxy?url=" + url.QueryEscape(orig.URL)
+
+	var b strings.Builder
+	b.WriteString(pageHead(r, title+" - Pinata"))
+	b.WriteString(`<div class="header"><a class="brand" href="/">Pinata</a><div class="search-box"><form class="search-inline" method="get" action="/search"><input type="text" name="q" placeholder="Search Image" required maxlength="64"><button type="submit">Search</button></form></div></div>`)
+	b.WriteString(`<div class="pin"><div class="pin-media"><a href="` + html.EscapeString(full) + `" target="_blank" rel="noreferrer"><img src="` + html.EscapeString(full) + `" alt="` + html.EscapeString(alt) + `"`)
+	if orig.Width > 0 && orig.Height > 0 {
+		b.WriteString(fmt.Sprintf(` width="%d" height="%d"`, orig.Width, orig.Height))
+	}
+	b.WriteString(` decoding="async"></a></div><div class="pin-info"><h2>` + html.EscapeString(title) + `</h2>`)
+	if desc != "" {
+		b.WriteString(`<p class="pin-desc">` + html.EscapeString(desc) + `</p>`)
+	}
+
+	b.WriteString(`<div class="pin-meta">`)
+	if p.IsVideo {
+		b.WriteString(`<div>This is a video pin: Pinata shows its cover image, video playback isn't supported yet.</div>`)
+	}
+	if lu, err := url.Parse(p.Link); err == nil && (lu.Scheme == "http" || lu.Scheme == "https") && lu.Host != "" {
+		b.WriteString(`<div>Source: <a href="` + html.EscapeString(lu.String()) + `" target="_blank" rel="noreferrer noopener">` + html.EscapeString(firstNonEmpty(p.Domain, lu.Hostname())) + `</a></div>`)
+	}
+	if p.Pinner != nil && p.Pinner.Username != "" {
+		who := html.EscapeString("@" + p.Pinner.Username)
+		if p.Pinner.FullName != "" {
+			who = html.EscapeString(p.Pinner.FullName) + " (" + who + ")"
+		}
+		b.WriteString(`<div>Saved by ` + who + `</div>`)
+	}
+	if p.Board != nil {
+		name := p.Board.Name
+		if name == "" {
+			parts := strings.Split(strings.Trim(p.Board.URL, "/"), "/")
+			name = parts[len(parts)-1]
+		}
+		if name != "" {
+			b.WriteString(`<div>Board: ` + html.EscapeString(name) + `</div>`)
+		}
+	}
+	if t, err := time.Parse(time.RFC1123Z, p.CreatedAt); err == nil {
+		b.WriteString(`<div>Created ` + t.Format("2 Jan 2006") + `</div>`)
+	}
+	if p.Aggregated != nil && p.Aggregated.Stats.Saves > 0 {
+		saves := "saves"
+		if p.Aggregated.Stats.Saves == 1 {
+			saves = "save"
+		}
+		b.WriteString(fmt.Sprintf(`<div>%d %s</div>`, p.Aggregated.Stats.Saves, saves))
+	}
+	b.WriteString(`</div><div class="pin-actions">`)
+	if !disableReverse {
+		b.WriteString(`<a class="magnifier" href="/revsearch?b64=` + base64.StdEncoding.EncodeToString([]byte(orig.URL)) + `" title="Search Tineye" target="_blank">🔍</a>`)
+	}
+	if bookmarkingEnabled {
+		b.WriteString(`<form method="post" action="/bookmark_image" style="display:inline;margin:0;"><input type="hidden" name="url" value="` + html.EscapeString(orig.URL) + `"><input type="hidden" name="next" value="/pin/` + id + `"><button class="btn-save-mini" type="submit" title="Save image">❤</button></form>`)
+	}
+	b.WriteString(`<a class="btn-save" href="` + html.EscapeString(full) + `" target="_blank" rel="noreferrer" style="text-decoration:none;">Full size</a>`)
+	b.WriteString(`</div></div></div></body></html>`)
+
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	_, _ = io.WriteString(w, b.String())
 }
 
 // ---------- secure image proxy (only https i.pinimg.com) ----------
@@ -1155,6 +1349,8 @@ func main() {
 	mux.HandleFunc("POST /settings", settingsPostHandler)
 	mux.HandleFunc("GET /{$}", indexHandler)
 	mux.HandleFunc("GET /search", searchHandler)
+	mux.HandleFunc("GET /pin/{id}", pinHandler)
+	mux.HandleFunc("GET /pin/{id}/{$}", pinHandler)
 	mux.HandleFunc("GET /image_proxy", imageProxyHandler)
 	mux.HandleFunc("GET /revsearch", revsearchHandler)
 	mux.HandleFunc("GET /thumb_proxy", thumbImageProxyHandler)
