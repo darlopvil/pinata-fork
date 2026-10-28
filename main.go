@@ -8,6 +8,7 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"html"
 	"image"
@@ -507,6 +508,62 @@ func useImageBackend() bool {
 	return imageBackendBase != ""
 }
 
+// ---------- error pages ----------
+
+// renderErrorPage writes a styled HTML error page with the given status code.
+func renderErrorPage(w http.ResponseWriter, r *http.Request, code int, msg string) {
+	accent, imgScale := getThemeVars(r)
+	inlineStyle := fmt.Sprintf(`<style>:root{--accent:%s;--accent-rgba:%s;--img-scale:%s;}</style>`, html.EscapeString(accent), html.EscapeString(hexToRGBA(accent, 0.12)), html.EscapeString(imgScale))
+	title := fmt.Sprintf("%d %s", code, http.StatusText(code))
+
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
+	w.WriteHeader(code)
+	_, _ = io.WriteString(w, `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>`+html.EscapeString(title)+` - Pinata</title><link rel="stylesheet" href="/static/style.css">`+inlineStyle+`</head><body>`)
+	_, _ = io.WriteString(w, `<div class="header"><a class="brand" href="/">Pinata</a></div>`)
+	_, _ = io.WriteString(w, `<h2 style="margin:4px 0 8px 0;">`+html.EscapeString(title)+`</h2><p style="color:var(--muted);">`+html.EscapeString(msg)+`</p><p><a href="/">Back to search</a></p></body></html>`)
+}
+
+// errorPageWriter replaces the mux's plain-text 404/405 bodies with the
+// styled error page. Any other status passes through untouched.
+type errorPageWriter struct {
+	http.ResponseWriter
+	r        *http.Request
+	replaced bool
+}
+
+func (e *errorPageWriter) WriteHeader(code int) {
+	switch code {
+	case http.StatusNotFound:
+		e.replaced = true
+		renderErrorPage(e.ResponseWriter, e.r, code, "This page doesn't exist.")
+	case http.StatusMethodNotAllowed:
+		e.replaced = true
+		renderErrorPage(e.ResponseWriter, e.r, code, "This address doesn't accept that kind of request.")
+	default:
+		e.ResponseWriter.WriteHeader(code)
+	}
+}
+
+func (e *errorPageWriter) Write(b []byte) (int, error) {
+	if e.replaced {
+		return len(b), nil
+	}
+	return e.ResponseWriter.Write(b)
+}
+
+// withErrorPages serves mux, using the styled error page for requests that
+// match no route or use the wrong method.
+func withErrorPages(mux *http.ServeMux) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if _, pattern := mux.Handler(r); pattern == "" {
+			mux.ServeHTTP(&errorPageWriter{ResponseWriter: w, r: r}, r)
+			return
+		}
+		mux.ServeHTTP(w, r)
+	})
+}
+
 // Index (front) - server-rendered bookmarks and settings form (no JS)
 func indexHandler(w http.ResponseWriter, r *http.Request) {
 	accent, imgScale := getThemeVars(r)
@@ -600,10 +657,29 @@ func searchHandler(w http.ResponseWriter, r *http.Request) {
 
 	resp, err := httpClient.Do(req)
 	if err != nil {
-		http.Error(w, "failed to fetch", http.StatusBadGateway)
+		// Log the cause without the URL: it carries the user's query.
+		var uerr *url.Error
+		if errors.As(err, &uerr) {
+			err = uerr.Err
+		}
+		log.Printf("pinterest search: request failed: %v", err)
+		renderErrorPage(w, r, http.StatusBadGateway, "Couldn't reach Pinterest. Try again in a moment.")
 		return
 	}
 	defer resp.Body.Close()
+
+	if resp.StatusCode < 200 || resp.StatusCode > 299 {
+		log.Printf("pinterest search: upstream status %d", resp.StatusCode)
+		if resp.StatusCode == http.StatusTooManyRequests {
+			if ra := resp.Header.Get("Retry-After"); ra != "" {
+				w.Header().Set("Retry-After", ra)
+			}
+			renderErrorPage(w, r, http.StatusServiceUnavailable, "Pinterest is rate-limiting this instance (HTTP 429). Try again later.")
+			return
+		}
+		renderErrorPage(w, r, http.StatusBadGateway, fmt.Sprintf("Pinterest returned an error (HTTP %d). Try again later.", resp.StatusCode))
+		return
+	}
 
 	var newCsrf string
 	for _, c := range resp.Cookies() {
@@ -636,6 +712,7 @@ func searchHandler(w http.ResponseWriter, r *http.Request) {
 	var nextBookmark string
 	nextSearch := "/search?q=" + url.QueryEscape(q)
 	chunk := make([]string, 0, chunkSize)
+	shown := 0
 
 	for {
 		tk, err := dec.Token()
@@ -676,6 +753,7 @@ func searchHandler(w http.ResponseWriter, r *http.Request) {
 				if u == "" {
 					continue
 				}
+				shown++
 				if chunkedMode {
 					chunk = append(chunk, u)
 					if len(chunk) >= chunkSize {
@@ -707,6 +785,9 @@ func searchHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	_, _ = io.WriteString(w, `</div>`)
+	if shown == 0 {
+		_, _ = io.WriteString(w, `<p style="color:var(--muted);">No results for "`+html.EscapeString(q)+`".</p>`)
+	}
 	if nextBookmark != "" {
 		qenc := url.QueryEscape(q)
 		benc := url.QueryEscape(nextBookmark)
@@ -1203,10 +1284,13 @@ func main() {
 	// Reject cross-origin browser requests with unsafe methods (CSRF),
 	// based on Sec-Fetch-Site with an Origin/Host fallback. Stateless: no tokens.
 	csrf := http.NewCrossOriginProtection()
+	csrf.SetDenyHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		renderErrorPage(w, r, http.StatusForbidden, "This request came from another site, so it was blocked to protect your bookmarks and settings.")
+	}))
 
 	server := &http.Server{
 		Addr:         ":8080",
-		Handler:      csrf.Handler(mux),
+		Handler:      csrf.Handler(withErrorPages(mux)),
 		ReadTimeout:  12 * time.Second,
 		WriteTimeout: 30 * time.Second,
 		IdleTimeout:  60 * time.Second,
