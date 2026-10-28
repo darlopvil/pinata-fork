@@ -389,13 +389,32 @@ func settingsPostHandler(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, next, http.StatusSeeOther)
 }
 
-func renderCardHTML(q, next, u, href string, thumbMobile, thumbDesktop, thumbHigh int) string {
+func renderCardHTML(next string, r *searchResult, href string, thumbMobile, thumbDesktop, thumbHigh int) string {
+	full := fullImage(r.Images.Orig, r.Images.X736)
+	u := full.URL
 	if href == "" {
 		href = "/image_proxy?url=" + url.QueryEscape(u)
 	}
-	tm := thumbURL(u, thumbMobile)
-	td := thumbURL(u, thumbDesktop)
-	th := thumbURL(u, thumbHigh)
+	// Thumbnails are resized from Pinterest's JPEG variants rather than the
+	// original: GIF and HEIC originals weigh megabytes, and the image proxy
+	// passes GIFs through unresized and can't decode HEIC.
+	thumbSrc := func(w int) string {
+		if w <= 474 && isPinimgURL(r.Images.X474.URL) {
+			return r.Images.X474.URL
+		}
+		if isPinimgURL(r.Images.X736.URL) {
+			return r.Images.X736.URL
+		}
+		return u
+	}
+	tm := thumbURL(thumbSrc(thumbMobile), thumbMobile)
+	td := thumbURL(thumbSrc(thumbDesktop), thumbDesktop)
+	th := thumbURL(thumbSrc(thumbHigh), thumbHigh)
+	// Width and height reserve the card's space before the thumbnail loads.
+	dims := r.Images.X474
+	if dims.Width <= 0 || dims.Height <= 0 {
+		dims = full
+	}
 
 	srcset := fmt.Sprintf("%s %dw, %s %dw, %s %dw", tm, thumbMobile, td, thumbDesktop, th, thumbHigh)
 	sizes := fmt.Sprintf("(max-width:640px) %dpx, %dpx", thumbMobile, thumbDesktop)
@@ -411,7 +430,11 @@ func renderCardHTML(q, next, u, href string, thumbMobile, thumbDesktop, thumbHig
 	b.WriteString(html.EscapeString(srcset))
 	b.WriteString(`" sizes="`)
 	b.WriteString(html.EscapeString(sizes))
-	b.WriteString(`" alt="image"></a>`)
+	b.WriteString(`"`)
+	if dims.Width > 0 && dims.Height > 0 {
+		b.WriteString(fmt.Sprintf(` width="%d" height="%d"`, dims.Width, dims.Height))
+	}
+	b.WriteString(` alt="image"></a>`)
 	b.WriteString(`<div class="card-controls">`)
 	if !disableReverse {
 		b.WriteString(`<a class="magnifier" href="/revsearch?b64=`)
@@ -680,7 +703,7 @@ func searchHandler(w http.ResponseWriter, r *http.Request) {
 					continue
 				}
 				shown++
-				_, _ = io.WriteString(w, renderCardHTML(q, nextSearch, u, cardHref(&rObj), thumbMobile, thumbDesktop, thumbHigh))
+				_, _ = io.WriteString(w, renderCardHTML(nextSearch, &rObj, cardHref(&rObj), thumbMobile, thumbDesktop, thumbHigh))
 				if f, ok := w.(http.Flusher); ok {
 					f.Flush()
 				}
@@ -719,6 +742,24 @@ func searchHandler(w http.ResponseWriter, r *http.Request) {
 
 // ---------- pin page ----------
 
+// pinImage is one size of a pin's image as Pinterest describes it.
+type pinImage struct {
+	URL    string `json:"url"`
+	Width  int    `json:"width"`
+	Height int    `json:"height"`
+}
+
+// fullImage returns the image to show at full size: the original, or the
+// 736x JPEG variant when the original is HEIC/HEIF, which most browsers
+// can't display.
+func fullImage(orig, x736 pinImage) pinImage {
+	lower := strings.ToLower(orig.URL)
+	if (strings.HasSuffix(lower, ".heic") || strings.HasSuffix(lower, ".heif")) && isPinimgURL(x736.URL) {
+		return x736
+	}
+	return orig
+}
+
 // pinData holds the PinResource fields the pin page uses.
 type pinData struct {
 	ID                 string `json:"id"`
@@ -732,11 +773,9 @@ type pinData struct {
 	Domain             string `json:"domain"`
 	CreatedAt          string `json:"created_at"`
 	IsVideo            bool   `json:"is_video"`
-	Images             map[string]struct {
-		URL    string `json:"url"`
-		Width  int    `json:"width"`
-		Height int    `json:"height"`
-	} `json:"images"`
+
+	Images map[string]pinImage `json:"images"`
+
 	Pinner *struct {
 		Username string `json:"username"`
 		FullName string `json:"full_name"`
@@ -788,11 +827,9 @@ type searchResult struct {
 	CreatedAt   string          `json:"created_at"`
 	Videos      json.RawMessage `json:"videos"`
 	Images      struct {
-		Orig struct {
-			URL    string `json:"url"`
-			Width  int    `json:"width"`
-			Height int    `json:"height"`
-		} `json:"orig"`
+		Orig pinImage `json:"orig"`
+		X474 pinImage `json:"474x"`
+		X736 pinImage `json:"736x"`
 	} `json:"images"`
 	Pinner *struct {
 		Username string `json:"username"`
@@ -936,15 +973,16 @@ func cardHref(r *searchResult) string {
 	if isPinID(r.ID) {
 		return "/pin/" + r.ID
 	}
-	if !isOpaquePinID(r.ID) || !isPinimgURL(r.Images.Orig.URL) {
+	full := fullImage(r.Images.Orig, r.Images.X736)
+	if !isOpaquePinID(r.ID) || !isPinimgURL(full.URL) {
 		return ""
 	}
 	c := pinCard{
 		T: truncateRunes(firstNonEmpty(r.Title, r.GridTitle), 200),
 		D: truncateRunes(r.Description, 500),
-		O: r.Images.Orig.URL,
-		W: r.Images.Orig.Width,
-		H: r.Images.Orig.Height,
+		O: full.URL,
+		W: full.Width,
+		H: full.Height,
 		A: truncateRunes(firstNonEmpty(r.AutoAltText, r.SeoAltText), 300),
 		M: r.Domain,
 		C: r.CreatedAt,
@@ -1026,7 +1064,7 @@ func pinFromPinterest(w http.ResponseWriter, r *http.Request, id string) {
 		return
 	}
 	p := body.ResourceResponse.Data
-	orig := p.Images["orig"]
+	orig := fullImage(p.Images["orig"], p.Images["736x"])
 	if !isPinimgURL(orig.URL) {
 		renderErrorPage(w, r, http.StatusBadGateway, "This pin has no image Pinata can show.")
 		return
@@ -1269,6 +1307,9 @@ func thumbImageProxyHandler(w http.ResponseWriter, r *http.Request) {
 	targetW, err := strconv.Atoi(strings.TrimSpace(r.URL.Query().Get("w")))
 	if err != nil || targetW < 1 {
 		targetW = 260
+	}
+	if targetW > 1040 { // the largest width cards ask for: 520 px at 200% scale
+		targetW = 1040
 	}
 
 	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
