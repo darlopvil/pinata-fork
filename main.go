@@ -1052,11 +1052,14 @@ func pinFromPinterest(w http.ResponseWriter, r *http.Request, id string) {
 }
 
 func renderPinPage(w http.ResponseWriter, r *http.Request, v pinView) {
-	title := firstNonEmpty(v.Title, "Pin")
+	// Many pins have a description but no title: then the heading is left out
+	// instead of a bare "Pin", and the page title uses the description.
+	heading := strings.TrimSpace(v.Title)
 	desc := strings.TrimSpace(v.Desc)
-	if strings.EqualFold(desc, title) {
+	if strings.EqualFold(desc, heading) {
 		desc = ""
 	}
+	title := firstNonEmpty(heading, truncateRunes(desc, 80), "Pin")
 	alt := firstNonEmpty(v.Alt, title)
 	full := "/image_proxy?url=" + url.QueryEscape(v.Orig)
 
@@ -1067,7 +1070,10 @@ func renderPinPage(w http.ResponseWriter, r *http.Request, v pinView) {
 	if v.Width > 0 && v.Height > 0 {
 		b.WriteString(fmt.Sprintf(` width="%d" height="%d"`, v.Width, v.Height))
 	}
-	b.WriteString(` decoding="async"></a></div><div class="pin-info"><h2>` + html.EscapeString(title) + `</h2>`)
+	b.WriteString(` decoding="async"></a></div><div class="pin-info">`)
+	if heading != "" {
+		b.WriteString(`<h2>` + html.EscapeString(heading) + `</h2>`)
+	}
 	if desc != "" {
 		b.WriteString(`<p class="pin-desc">` + html.EscapeString(desc) + `</p>`)
 	}
