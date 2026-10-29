@@ -83,9 +83,12 @@ const maxQueryRunes = 64
 // is longer is bookmarked as an image instead.
 const maxPinLink = 1024
 
-// maxCookieValue keeps the bookmarks cookie (name=value) within the 4096
-// bytes browsers accept per cookie; a larger Set-Cookie is silently dropped.
-const maxCookieValue = 4096 - len(cookieName) - 1
+// maxCookieValue caps the bookmarks cookie value. Browsers accept 4096 bytes
+// per cookie, but the response that sets it must also fit in the 4 KB nginx
+// allows by default for upstream response headers (proxy_buffer_size), or a
+// proxy in front answers 502. Measured: the other headers of a response that
+// sets this cookie take up to 475 bytes, so 3500 leaves ~120 bytes of margin.
+const maxCookieValue = 3500
 
 // Image bookmarks are almost always pinimg URLs. Inside the cookie their
 // prefix is stored as "~": repeated in every entry, it alone made 30 image
@@ -1230,7 +1233,9 @@ func cardHref(r *searchResult) string {
 // results are rendered from their signed link.
 func pinHandler(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	if i := strings.LastIndex(id, "--"); i >= 0 {
+	// Pinterest's "<slug>--<id>" form. Opaque IDs ("e1_...") can contain
+	// "--" themselves, so they are left alone.
+	if i := strings.LastIndex(id, "--"); i >= 0 && !strings.HasPrefix(id, "e1_") {
 		id = id[i+2:]
 	}
 	if isPinID(id) {
@@ -1736,6 +1741,11 @@ func saveFrameHandler(w http.ResponseWriter, r *http.Request) {
 			break
 		}
 	}
+	renderSaveFrame(w, r, typ, v, img, saved)
+}
+
+// renderSaveFrame writes the save button document shown inside the frame.
+func renderSaveFrame(w http.ResponseWriter, r *http.Request, typ, v, img string, saved bool) {
 	accent, _ := getThemeVars(r)
 	action, label, title, class := "add", "❤", "Save", "heart"
 	if typ == "q" {
@@ -1790,7 +1800,11 @@ func saveFramePostHandler(w http.ResponseWriter, r *http.Request) {
 	} else {
 		setBookmarksCookie(w, r, out)
 	}
-	http.Redirect(w, r, saveFrameURL(typ, v, img), http.StatusSeeOther)
+	// Answer with the button in its new state rather than redirecting: a
+	// Location carrying a ~500-byte pin link, on top of a cookie of up to 4
+	// KB, overflowed the 4 KB of response headers nginx accepts by default
+	// (proxy_buffer_size), and the proxy answered 502.
+	renderSaveFrame(w, r, typ, v, img, r.PostFormValue("action") == "add")
 }
 
 func bookmarkRemoveHandler(w http.ResponseWriter, r *http.Request) {
