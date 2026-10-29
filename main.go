@@ -63,8 +63,9 @@ const cookieName = "pinata_bm"
 
 // ---------- bookmarks types / config ----------
 type BookmarkEntry struct {
-	Type  string `json:"type"`  // "q" or "img"
-	Value string `json:"value"` // query or image URL
+	Type  string `json:"type"`            // "q", "img" or "pin"
+	Value string `json:"value"`           // query, image URL or pin page link
+	Image string `json:"image,omitempty"` // pin image, for numeric pin links
 }
 
 var bookmarkKey []byte
@@ -76,6 +77,11 @@ var pinLinkKey []byte
 const maxBookmarks = 30
 const maxItemLen = 256
 const maxQueryRunes = 64
+
+// maxPinLink caps the pin page links a bookmark can hold. Measured signed
+// links are 435 bytes, 524 with a 500-character description; a pin whose link
+// is longer is bookmarked as an image instead.
+const maxPinLink = 1024
 
 // maxCookieValue keeps the bookmarks cookie (name=value) within the 4096
 // bytes browsers accept per cookie; a larger Set-Cookie is silently dropped.
@@ -92,6 +98,9 @@ func compactBookmarks(entries []BookmarkEntry) []BookmarkEntry {
 		if e.Type == "img" && strings.HasPrefix(e.Value, pinimgPrefix) {
 			e.Value = "~" + strings.TrimPrefix(e.Value, pinimgPrefix)
 		}
+		if strings.HasPrefix(e.Image, pinimgPrefix) {
+			e.Image = "~" + strings.TrimPrefix(e.Image, pinimgPrefix)
+		}
 		out[i] = e
 	}
 	return out
@@ -102,7 +111,76 @@ func expandBookmarks(entries []BookmarkEntry) {
 		if e.Type == "img" && strings.HasPrefix(e.Value, "~") {
 			entries[i].Value = pinimgPrefix + strings.TrimPrefix(e.Value, "~")
 		}
+		if strings.HasPrefix(e.Image, "~") {
+			entries[i].Image = pinimgPrefix + strings.TrimPrefix(e.Image, "~")
+		}
 	}
+}
+
+// normalizeEntry cleans a bookmark before it is stored, and reports whether
+// it is worth keeping.
+func normalizeEntry(e BookmarkEntry) (BookmarkEntry, bool) {
+	e.Value = strings.TrimSpace(e.Value)
+	switch e.Type {
+	case "pin":
+		// Only genuine pin links are stored: an invalid one would take cookie
+		// space without ever showing up on the homepage to be removed.
+		if e.Value == "" || len(e.Value) > maxPinLink {
+			return e, false
+		}
+		if _, _, ok := pinLinkInfo(e.Value, e.Image); !ok {
+			return e, false
+		}
+		if !isPinID(strings.TrimPrefix(e.Value, "/pin/")) {
+			e.Image = "" // signed links carry their image
+		}
+	case "img":
+		e.Value, e.Image = truncateUTF8(e.Value, maxItemLen), ""
+	default:
+		e.Type, e.Value, e.Image = "q", truncateUTF8(e.Value, maxItemLen), ""
+	}
+	return e, e.Value != ""
+}
+
+// pinLinkInfo checks a bookmarked pin link and returns the image to show for
+// it and its title, if known. Signed links carry both and are verified;
+// numeric links rely on the stored image.
+func pinLinkInfo(link, image string) (string, string, bool) {
+	u, err := url.Parse(link)
+	if err != nil || u.Scheme != "" || u.Host != "" || !strings.HasPrefix(u.Path, "/pin/") {
+		return "", "", false
+	}
+	id := strings.TrimPrefix(u.Path, "/pin/")
+	if isPinID(id) {
+		return image, "", isPinimgURL(image)
+	}
+	if !isOpaquePinID(id) {
+		return "", "", false
+	}
+	c, ok := openPinCard(id, u.Query().Get("d"), u.Query().Get("s"))
+	if !ok {
+		return "", "", false
+	}
+	return c.O, firstNonEmpty(c.T, truncateRunes(c.D, 150)), true
+}
+
+// variantURL maps a pinimg URL (an original or any size) to the JPEG of
+// another size: Pinterest serves every size under the same path and hash,
+// always as JPEG (checked for JPG, PNG, GIF and HEIC originals).
+func variantURL(u, size string) string {
+	if !isPinimgURL(u) {
+		return ""
+	}
+	rest := strings.TrimPrefix(u, pinimgPrefix)
+	i := strings.Index(rest, "/")
+	if i < 0 {
+		return ""
+	}
+	p := rest[i+1:]
+	if dot := strings.LastIndex(p, "."); dot > strings.LastIndex(p, "/") {
+		p = p[:dot]
+	}
+	return pinimgPrefix + size + "/" + p + ".jpg"
 }
 
 // truncateUTF8 cuts s to at most n bytes without splitting a character.
@@ -116,10 +194,11 @@ func truncateUTF8(s string, n int) string {
 	return s[:n]
 }
 
-// bookmarksFull reports whether one more bookmark of the largest allowed size
+// bookmarksFull reports whether one more bookmark the size of a typical pin
 // would push the oldest ones out.
 func bookmarksFull(entries []BookmarkEntry) bool {
-	probe := append([]BookmarkEntry{{Type: "img", Value: strings.Repeat("x", maxItemLen)}}, entries...)
+	// Most bookmarks are pins: probe with the longest measured pin link.
+	probe := append([]BookmarkEntry{{Type: "pin", Value: strings.Repeat("x", 524)}}, entries...)
 	if len(probe) > maxBookmarks {
 		return true
 	}
@@ -270,20 +349,16 @@ func setBookmarksCookie(w http.ResponseWriter, r *http.Request, entries []Bookma
 	seen := map[string]bool{}
 	out := make([]BookmarkEntry, 0, len(entries))
 	for _, e := range entries {
-		v := strings.TrimSpace(e.Value)
-		if v == "" {
+		e, ok := normalizeEntry(e)
+		if !ok {
 			continue
 		}
-		v = truncateUTF8(v, maxItemLen)
-		if e.Type != "q" && e.Type != "img" {
-			e.Type = "q"
-		}
-		key := e.Type + "|" + v
+		key := e.Type + "|" + e.Value
 		if seen[key] {
 			continue
 		}
 		seen[key] = true
-		out = append(out, BookmarkEntry{Type: e.Type, Value: v})
+		out = append(out, e)
 		if len(out) >= maxBookmarks {
 			break
 		}
@@ -427,7 +502,7 @@ func getThemeVars(r *http.Request) (string, string) {
 }
 
 // ---------- CSS (uses CSS vars; defaults are present but overridden per-request via inline style) ----------
-const cssContent = `:root{--bg:#0b0f17;--muted:#94a3b8;--text:#e6e6ff;--accent:#7c3aed;--accent-rgba:rgba(124,58,237,0.12);--img-scale:1}*{box-sizing:border-box}html,body{height:100%}body{margin:0;padding:20px;background:linear-gradient(180deg,#071020 0%,var(--bg) 100%);color:var(--text);font-family:ui-monospace,Menlo,Monaco,monospace}a{color:inherit}.header{display:flex;gap:12px;align-items:center;margin-bottom:18px;flex-wrap:wrap}.brand{font-size:20px;font-weight:700;color:var(--accent);text-decoration:none}.search-box{margin-left:auto;display:flex;gap:8px;align-items:center;flex:0 1 auto}.search-block{width:100%;display:flex;gap:8px;margin-top:14px}.search-inline{display:flex;gap:8px;align-items:center;min-width:0}input[type="text"]{background:transparent;border:1px solid rgba(255,255,255,0.06);padding:8px 12px;color:var(--text);min-width:120px;border-radius:8px;outline:none}button[type="submit"],.btn-save{background:linear-gradient(90deg,var(--accent),#5b21b6);color:white;border:none;padding:8px 12px;border-radius:8px;cursor:pointer}.btn-save{font-weight:600}.img-container{column-width:calc(260px * var(--img-scale));column-gap:16px;width:100%;max-width:1400px;margin-top:18px}.card{display:inline-block;width:100%;margin:0 0 16px;border-radius:10px;overflow:hidden;background:linear-gradient(180deg,rgba(255,255,255,0.01),rgba(255,255,255,0.02));box-shadow:0 6px 18px rgba(3,7,18,0.6);border:1px solid rgba(124,58,237,0.06);break-inside:avoid;-webkit-column-break-inside:avoid;-moz-column-break-inside:avoid;min-height:0;position:relative}.card a{text-decoration:none}.card img{display:block;width:100%;height:auto;object-fit:cover;background:#08101a;font-size:12px;line-height:1.4;overflow:hidden}.card-controls{position:absolute;top:8px;right:8px;display:flex;gap:8px;align-items:center}.btn-save-mini{background:rgba(0,0,0,0.45);border:1px solid rgba(255,255,255,0.06);color:var(--text);padding:6px;border-radius:999px;cursor:pointer;font-weight:700;display:inline-flex;align-items:center;justify-content:center;width:34px;height:34px;text-decoration:none}.magnifier{background:rgba(0,0,0,0.45);border:1px solid rgba(255,255,255,0.06);color:var(--text);padding:6px;border-radius:999px;font-size:14px;width:34px;height:34px;display:inline-flex;align-items:center;justify-content:center;text-decoration:none}.bookmarks{margin-left:12px;color:var(--muted);font-size:14px}.bookmark-list{margin-top:10px;display:flex;gap:8px;flex-wrap:wrap}.bookmark-pill{background:rgba(255,255,255,0.03);padding:6px 8px;border-radius:999px;border:1px solid rgba(255,255,255,0.04);font-size:13px;display:flex;gap:6px;align-items:center}.bookmark-pill form{display:inline}.bookmark-remove-btn{background:transparent;border:none;color:#ff7b7b;font-weight:700;cursor:pointer;padding:0 6px}.export-form{margin-top:12px;display:flex;gap:8px;align-items:center}.pagination{text-align:center;margin:26px 0}.pagination a{color:var(--accent);text-decoration:none;padding:8px 12px;border-radius:8px;border:1px solid rgba(124,58,237,0.12);background:rgba(124,58,237,0.02)}.footer-note{color:var(--muted);font-size:12px;margin-top:22px}.pin{display:flex;gap:24px;align-items:flex-start;flex-wrap:wrap;margin-top:18px}.pin-media{flex:0 1 auto;max-width:100%}.pin-media img{display:block;max-width:100%;width:auto;height:auto;border-radius:10px;background:#08101a;font-size:14px;overflow:hidden}@media (min-width:641px){.pin-media img{max-height:85vh}}.pin-info{flex:1 1 280px;max-width:560px}.pin-info h2{margin:0 0 10px}.pin-desc{white-space:pre-line;margin:0 0 12px}.pin-meta{color:var(--muted);font-size:14px;line-height:1.7;margin:0 0 12px}.pin-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.save-frame{display:block;width:34px;height:34px;border:0;background:transparent;overflow:hidden}.save-frame-q{width:96px;height:36px;margin-left:8px}@media (max-width:640px){body{padding:12px;font-size:18px}.brand{font-size:22px}input[type="text"]{min-width:120px;padding:12px 14px;font-size:16px}button[type="submit"],.btn-save{padding:10px 14px;font-size:16px;border-radius:10px}.img-container{column-width:calc(180px * var(--img-scale));column-gap:12px}.search-block{gap:10px;flex-direction:column}.search-inline{width:100%}.search-box{margin-left:0;width:100%}.bookmarks{order:3;width:100%;margin-top:8px}}`
+const cssContent = `:root{--bg:#0b0f17;--muted:#94a3b8;--text:#e6e6ff;--accent:#7c3aed;--accent-rgba:rgba(124,58,237,0.12);--img-scale:1}*{box-sizing:border-box}html,body{height:100%}body{margin:0;padding:20px;background:linear-gradient(180deg,#071020 0%,var(--bg) 100%);color:var(--text);font-family:ui-monospace,Menlo,Monaco,monospace}a{color:inherit}.header{display:flex;gap:12px;align-items:center;margin-bottom:18px;flex-wrap:wrap}.brand{font-size:20px;font-weight:700;color:var(--accent);text-decoration:none}.search-box{margin-left:auto;display:flex;gap:8px;align-items:center;flex:0 1 auto}.search-block{width:100%;display:flex;gap:8px;margin-top:14px}.search-inline{display:flex;gap:8px;align-items:center;min-width:0}input[type="text"]{background:transparent;border:1px solid rgba(255,255,255,0.06);padding:8px 12px;color:var(--text);min-width:120px;border-radius:8px;outline:none}button[type="submit"],.btn-save{background:linear-gradient(90deg,var(--accent),#5b21b6);color:white;border:none;padding:8px 12px;border-radius:8px;cursor:pointer}.btn-save{font-weight:600}.img-container{column-width:calc(260px * var(--img-scale));column-gap:16px;width:100%;max-width:1400px;margin-top:18px}.card{display:inline-block;width:100%;margin:0 0 16px;border-radius:10px;overflow:hidden;background:linear-gradient(180deg,rgba(255,255,255,0.01),rgba(255,255,255,0.02));box-shadow:0 6px 18px rgba(3,7,18,0.6);border:1px solid rgba(124,58,237,0.06);break-inside:avoid;-webkit-column-break-inside:avoid;-moz-column-break-inside:avoid;min-height:0;position:relative}.card a{text-decoration:none}.card img{display:block;width:100%;height:auto;object-fit:cover;background:#08101a;font-size:12px;line-height:1.4;overflow:hidden}.card-controls{position:absolute;top:8px;right:8px;display:flex;gap:8px;align-items:center}.btn-save-mini{background:rgba(0,0,0,0.45);border:1px solid rgba(255,255,255,0.06);color:var(--text);padding:6px;border-radius:999px;cursor:pointer;font-weight:700;display:inline-flex;align-items:center;justify-content:center;width:34px;height:34px;text-decoration:none}.magnifier{background:rgba(0,0,0,0.45);border:1px solid rgba(255,255,255,0.06);color:var(--text);padding:6px;border-radius:999px;font-size:14px;width:34px;height:34px;display:inline-flex;align-items:center;justify-content:center;text-decoration:none}.bookmarks{margin-left:12px;color:var(--muted);font-size:14px}.bookmark-list{margin-top:10px;display:flex;gap:8px;flex-wrap:wrap}.bookmark-pill{background:rgba(255,255,255,0.03);padding:6px 8px;border-radius:999px;border:1px solid rgba(255,255,255,0.04);font-size:13px;display:flex;gap:6px;align-items:center}.bookmark-pill form{display:inline}.bookmark-remove-btn{background:transparent;border:none;color:#ff7b7b;font-weight:700;cursor:pointer;padding:0 6px}.bm-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:10px;margin-top:12px;max-width:1100px}.bm-tile{position:relative;aspect-ratio:3/4;border-radius:10px;overflow:hidden;background:#08101a;border:1px solid rgba(255,255,255,0.04)}.bm-tile img{display:block;width:100%;height:100%;object-fit:cover;font-size:12px;color:var(--muted)}.bm-tile form{position:absolute;top:6px;right:6px;margin:0}.bm-tile .bookmark-remove-btn{width:28px;height:28px;padding:0;border-radius:999px;background:rgba(0,0,0,0.55)}.export-form{margin-top:12px;display:flex;gap:8px;align-items:center}.pagination{text-align:center;margin:26px 0}.pagination a{color:var(--accent);text-decoration:none;padding:8px 12px;border-radius:8px;border:1px solid rgba(124,58,237,0.12);background:rgba(124,58,237,0.02)}.footer-note{color:var(--muted);font-size:12px;margin-top:22px}.pin{display:flex;gap:24px;align-items:flex-start;flex-wrap:wrap;margin-top:18px}.pin-media{flex:0 1 auto;max-width:100%}.pin-media img{display:block;max-width:100%;width:auto;height:auto;border-radius:10px;background:#08101a;font-size:14px;overflow:hidden}@media (min-width:641px){.pin-media img{max-height:85vh}}.pin-info{flex:1 1 280px;max-width:560px}.pin-info h2{margin:0 0 10px}.pin-desc{white-space:pre-line;margin:0 0 12px}.pin-meta{color:var(--muted);font-size:14px;line-height:1.7;margin:0 0 12px}.pin-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.save-frame{display:block;width:34px;height:34px;border:0;background:transparent;overflow:hidden}.save-frame-q{width:96px;height:36px;margin-left:8px}@media (max-width:640px){body{padding:12px;font-size:18px}.brand{font-size:22px}input[type="text"]{min-width:120px;padding:12px 14px;font-size:16px}button[type="submit"],.btn-save{padding:10px 14px;font-size:16px;border-radius:10px}.img-container{column-width:calc(180px * var(--img-scale));column-gap:12px}.search-block{gap:10px;flex-direction:column}.search-inline{width:100%}.search-box{margin-left:0;width:100%}.bookmarks{order:3;width:100%;margin-top:8px}}`
 
 // ---------- handlers ----------
 
@@ -546,7 +621,7 @@ func renderCardHTML(r *searchResult, href string, thumbMobile, thumbDesktop, thu
 		b.WriteString(`" title="Search Tineye" target="_blank">🔍</a>`)
 	}
 	if bookmarkingEnabled {
-		b.WriteString(saveFrameTag("img", u))
+		b.WriteString(pinSaveFrame(href, u))
 	}
 	b.WriteString(`</div></div>`)
 	return b.String()
@@ -683,17 +758,38 @@ func indexHandler(w http.ResponseWriter, r *http.Request) {
 		if bookmarksFull(items) {
 			_, _ = io.WriteString(w, `<div style="font-size:13px;color:var(--muted);margin-top:4px">Bookmark storage is nearly full: new saves may remove the oldest ones.</div>`)
 		}
-		_, _ = io.WriteString(w, `<div class="bookmark-list">`)
+		var pills, tiles strings.Builder
 		for _, e := range items {
-			escaped := html.EscapeString(e.Value)
-			if e.Type == "q" {
-				_, _ = io.WriteString(w, `<span class="bookmark-pill"><a href="/search?q=`+url.QueryEscape(e.Value)+`">`+escaped+`</a>`)
-			} else {
-				_, _ = io.WriteString(w, `<span class="bookmark-pill"><a href="/image_proxy?url=`+url.QueryEscape(e.Value)+`">`+escaped+`</a>`)
+			remove := `<form method="post" action="/bookmark_remove"><input type="hidden" name="type" value="` + html.EscapeString(e.Type) + `"><input type="hidden" name="value" value="` + html.EscapeString(e.Value) + `"><button class="bookmark-remove-btn" type="submit" title="Remove">✕</button></form>`
+			var link, img, alt string
+			switch e.Type {
+			case "q":
+				pills.WriteString(`<span class="bookmark-pill"><a href="/search?q=` + url.QueryEscape(e.Value) + `">` + html.EscapeString(e.Value) + `</a>` + remove + `</span>`)
+				continue
+			case "pin":
+				var ok bool
+				if img, alt, ok = pinLinkInfo(e.Value, e.Image); !ok {
+					continue
+				}
+				link = e.Value
+			case "img":
+				if !isPinimgURL(e.Value) {
+					continue
+				}
+				img, link = e.Value, "/image_proxy?url="+url.QueryEscape(e.Value)
 			}
-			_, _ = io.WriteString(w, `<form method="post" action="/bookmark_remove" style="display:inline;margin:0 0 0 6px;"><input type="hidden" name="type" value="`+html.EscapeString(e.Type)+`"><input type="hidden" name="value" value="`+html.EscapeString(e.Value)+`"><button class="bookmark-remove-btn" type="submit" title="Remove">✕</button></form></span>`)
+			thumb := img
+			if v := variantURL(img, "474x"); v != "" {
+				thumb = v
+			}
+			tiles.WriteString(`<div class="bm-tile"><a href="` + html.EscapeString(link) + `" target="_blank" rel="noreferrer"><img loading="lazy" decoding="async" src="` + html.EscapeString(thumbURL(thumb, 260)) + `" alt="` + html.EscapeString(firstNonEmpty(alt, "Bookmarked pin")) + `"></a>` + remove + `</div>`)
 		}
-		_, _ = io.WriteString(w, `</div>`)
+		if pills.Len() > 0 {
+			_, _ = io.WriteString(w, `<div class="bookmark-list">`+pills.String()+`</div>`)
+		}
+		if tiles.Len() > 0 {
+			_, _ = io.WriteString(w, `<div class="bm-grid">`+tiles.String()+`</div>`)
+		}
 		_, _ = io.WriteString(w, `<div class="export-form"><form method="get" action="/bookmarks/export"><button type="submit" class="btn-save">Export JSON</button></form>`)
 		_, _ = io.WriteString(w, `<form method="post" action="/bookmarks/import" enctype="multipart/form-data" style="margin-left:8px;"><input type="file" name="file" accept="application/json" required><button type="submit" class="btn-save" style="margin-left:8px">Import JSON</button></form></div>`)
 		_, _ = io.WriteString(w, `</div>`)
@@ -776,7 +872,7 @@ func searchHandler(w http.ResponseWriter, r *http.Request) {
 	_, _ = io.WriteString(w, `<div class="header" style="margin-bottom:8px;"><a class="brand" href="/">Pinata</a><div class="search-box">`)
 	_, _ = io.WriteString(w, `<form class="search-inline" method="get" action="/search"><input type="text" name="q" value="`+html.EscapeString(q)+`" maxlength="64"><button type="submit">Search</button></form>`)
 	if bookmarkingEnabled {
-		_, _ = io.WriteString(w, saveFrameTag("q", q))
+		_, _ = io.WriteString(w, saveFrameTag("q", q, ""))
 	}
 	_, _ = io.WriteString(w, `</div></div>`)
 	_, _ = io.WriteString(w, `<h2 style="margin:4px 0 0 0;">Results for "`+html.EscapeString(q)+`"</h2>`)
@@ -1003,6 +1099,7 @@ type pinView struct {
 	Saves      int
 	IsVideo    bool
 	Color      string // dominant color, for the placeholder
+	Link       string // this pin page's link, for bookmarks
 }
 
 // isOpaquePinID reports whether s looks like the opaque IDs ("e1_...") that
@@ -1144,7 +1241,7 @@ func pinHandler(w http.ResponseWriter, r *http.Request) {
 		q := r.URL.Query()
 		if c, ok := openPinCard(id, q.Get("d"), q.Get("s")); ok {
 			renderPinPage(w, r, pinView{
-				Title: c.T, Desc: c.D, Orig: c.O, Width: c.W, Height: c.H, Alt: c.A,
+				Link: r.URL.RequestURI(), Title: c.T, Desc: c.D, Orig: c.O, Width: c.W, Height: c.H, Alt: c.A,
 				Domain: c.M, PinnerUser: c.U, PinnerName: c.N, Board: c.B, CreatedAt: c.C, Saves: c.S, IsVideo: c.V, Color: c.K,
 			})
 			return
@@ -1194,7 +1291,7 @@ func pinFromPinterest(w http.ResponseWriter, r *http.Request, id string) {
 		return
 	}
 	v := pinView{
-		Title: p.Title, Desc: firstNonEmpty(p.CloseupDescription, p.Description),
+		Link: "/pin/" + id, Title: p.Title, Desc: firstNonEmpty(p.CloseupDescription, p.Description),
 		Orig: orig.URL, Width: orig.Width, Height: orig.Height, Alt: firstNonEmpty(p.AltText, p.AutoAltText),
 		SourceURL: p.Link, Domain: p.Domain, CreatedAt: p.CreatedAt, IsVideo: p.IsVideo, Color: p.DominantColor,
 	}
@@ -1274,7 +1371,7 @@ func renderPinPage(w http.ResponseWriter, r *http.Request, v pinView) {
 		b.WriteString(`<a class="magnifier" href="/revsearch?b64=` + base64.StdEncoding.EncodeToString([]byte(v.Orig)) + `" title="Search Tineye" target="_blank">🔍</a>`)
 	}
 	if bookmarkingEnabled {
-		b.WriteString(saveFrameTag("img", v.Orig))
+		b.WriteString(pinSaveFrame(v.Link, v.Orig))
 	}
 	b.WriteString(`<a class="btn-save" href="` + html.EscapeString(full) + `" target="_blank" rel="noreferrer" style="text-decoration:none;">Full size</a>`)
 	b.WriteString(`</div></div></div></body></html>`)
@@ -1568,28 +1665,57 @@ func revsearchHandler(w http.ResponseWriter, r *http.Request) {
 
 // saveTarget validates what a save button stores: a pinimg image URL or a
 // search query.
-func saveTarget(typ, v string) (string, bool) {
+// saveTarget validates what a save button stores: a pin page link (with its
+// image for numeric pins), a pinimg image URL or a search query. It returns
+// the value and the image to store.
+func saveTarget(typ, v, img string) (string, string, bool) {
 	v = strings.TrimSpace(v)
 	switch typ {
+	case "pin":
+		if len(v) > maxPinLink {
+			return "", "", false
+		}
+		if _, _, ok := pinLinkInfo(v, img); !ok {
+			return "", "", false
+		}
+		if !isPinID(strings.TrimPrefix(v, "/pin/")) {
+			img = "" // signed links carry their image
+		}
+		return v, img, true
 	case "img":
-		return v, len(v) <= maxItemLen && isPinimgURL(v)
+		return v, "", len(v) <= maxItemLen && isPinimgURL(v)
 	case "q":
-		return v, v != "" && utf8.RuneCountInString(v) <= maxQueryRunes
+		return v, "", v != "" && utf8.RuneCountInString(v) <= maxQueryRunes
 	}
-	return "", false
+	return "", "", false
 }
 
-func saveFrameURL(typ, v string) string {
-	return "/frame/save?type=" + url.QueryEscape(typ) + "&v=" + url.QueryEscape(v)
+func saveFrameURL(typ, v, img string) string {
+	u := "/frame/save?type=" + url.QueryEscape(typ) + "&v=" + url.QueryEscape(v)
+	if img != "" {
+		u += "&img=" + url.QueryEscape(img)
+	}
+	return u
 }
 
 // saveFrameTag returns the iframe that embeds a save button.
-func saveFrameTag(typ, v string) string {
-	class, title := "save-frame", "Save image"
+func saveFrameTag(typ, v, img string) string {
+	class, title := "save-frame", "Save pin"
 	if typ == "q" {
 		class, title = "save-frame save-frame-q", "Save search"
+	} else if typ == "img" {
+		title = "Save image"
 	}
-	return `<iframe class="` + class + `" src="` + html.EscapeString(saveFrameURL(typ, v)) + `" title="` + title + `" loading="lazy" scrolling="no"></iframe>`
+	return `<iframe class="` + class + `" src="` + html.EscapeString(saveFrameURL(typ, v, img)) + `" title="` + title + `" loading="lazy" scrolling="no"></iframe>`
+}
+
+// pinSaveFrame returns the save button for a pin: it saves the pin page link,
+// or just the image when the link is too long to store.
+func pinSaveFrame(link, img string) string {
+	if strings.HasPrefix(link, "/pin/") && len(link) <= maxPinLink {
+		return saveFrameTag("pin", link, img)
+	}
+	return saveFrameTag("img", img, "")
 }
 
 func saveFrameHandler(w http.ResponseWriter, r *http.Request) {
@@ -1598,7 +1724,7 @@ func saveFrameHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	typ := r.URL.Query().Get("type")
-	v, ok := saveTarget(typ, r.URL.Query().Get("v"))
+	v, img, ok := saveTarget(typ, r.URL.Query().Get("v"), r.URL.Query().Get("img"))
 	if !ok {
 		http.Error(w, "invalid bookmark", http.StatusBadRequest)
 		return
@@ -1611,7 +1737,7 @@ func saveFrameHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	accent, _ := getThemeVars(r)
-	action, label, title, class := "add", "❤", "Save image", "heart"
+	action, label, title, class := "add", "❤", "Save", "heart"
 	if typ == "q" {
 		label, title, class = "Save", "Save search", "text"
 	}
@@ -1630,7 +1756,7 @@ func saveFrameHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
 	_, _ = io.WriteString(w, `<!doctype html><html lang="en"><head><meta charset="utf-8"><style>`+css+`</style></head><body>`+
-		`<form method="post" action="/frame/save"><input type="hidden" name="type" value="`+html.EscapeString(typ)+`"><input type="hidden" name="v" value="`+html.EscapeString(v)+`"><input type="hidden" name="action" value="`+action+`">`+
+		`<form method="post" action="/frame/save"><input type="hidden" name="type" value="`+html.EscapeString(typ)+`"><input type="hidden" name="v" value="`+html.EscapeString(v)+`"><input type="hidden" name="img" value="`+html.EscapeString(img)+`"><input type="hidden" name="action" value="`+action+`">`+
 		`<button type="submit" class="`+class+`" title="`+title+`">`+label+`</button></form></body></html>`)
 }
 
@@ -1644,14 +1770,14 @@ func saveFramePostHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	typ := r.PostFormValue("type")
-	v, ok := saveTarget(typ, r.PostFormValue("v"))
+	v, img, ok := saveTarget(typ, r.PostFormValue("v"), r.PostFormValue("img"))
 	if !ok {
 		http.Error(w, "invalid bookmark", http.StatusBadRequest)
 		return
 	}
 	out := make([]BookmarkEntry, 0, maxBookmarks)
 	if r.PostFormValue("action") == "add" {
-		out = append(out, BookmarkEntry{Type: typ, Value: v})
+		out = append(out, BookmarkEntry{Type: typ, Value: v, Image: img})
 	}
 	for _, e := range readBookmarksFromReq(r) {
 		if e.Type == typ && e.Value == v {
@@ -1664,7 +1790,7 @@ func saveFramePostHandler(w http.ResponseWriter, r *http.Request) {
 	} else {
 		setBookmarksCookie(w, r, out)
 	}
-	http.Redirect(w, r, saveFrameURL(typ, v), http.StatusSeeOther)
+	http.Redirect(w, r, saveFrameURL(typ, v, img), http.StatusSeeOther)
 }
 
 func bookmarkRemoveHandler(w http.ResponseWriter, r *http.Request) {
@@ -1767,13 +1893,9 @@ func bookmarksImportHandler(w http.ResponseWriter, r *http.Request) {
 		merged = append(merged, e)
 	}
 	for _, e := range entries {
-		e.Value = strings.TrimSpace(e.Value)
-		if e.Value == "" {
+		e, ok := normalizeEntry(e)
+		if !ok {
 			continue
-		}
-		e.Value = truncateUTF8(e.Value, maxItemLen)
-		if e.Type != "q" && e.Type != "img" {
-			e.Type = "q"
 		}
 		add(e)
 		if len(merged) >= maxBookmarks {
