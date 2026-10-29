@@ -425,11 +425,16 @@ func renderCardHTML(next string, r *searchResult, href string, thumbMobile, thum
 	b.WriteString(`<a href="`)
 	b.WriteString(html.EscapeString(href))
 	b.WriteString(`" style="display:block;" target="_blank" rel="noreferrer"><img loading="lazy" decoding="async" src="`)
-	b.WriteString(html.EscapeString(td))
-	b.WriteString(`" srcset="`)
-	b.WriteString(html.EscapeString(srcset))
-	b.WriteString(`" sizes="`)
-	b.WriteString(html.EscapeString(sizes))
+	if strings.HasSuffix(strings.ToLower(u), ".gif") {
+		// GIF cards show the animated original instead of a resized JPEG.
+		b.WriteString(html.EscapeString("/image_proxy?url=" + url.QueryEscape(u)))
+	} else {
+		b.WriteString(html.EscapeString(td))
+		b.WriteString(`" srcset="`)
+		b.WriteString(html.EscapeString(srcset))
+		b.WriteString(`" sizes="`)
+		b.WriteString(html.EscapeString(sizes))
+	}
 	b.WriteString(`"`)
 	if dims.Width > 0 && dims.Height > 0 {
 		b.WriteString(fmt.Sprintf(` width="%d" height="%d"`, dims.Width, dims.Height))
