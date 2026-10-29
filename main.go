@@ -75,6 +75,57 @@ var pinLinkKey []byte
 
 const maxBookmarks = 30
 const maxItemLen = 256
+const maxQueryRunes = 64
+
+// maxCookieValue keeps the bookmarks cookie (name=value) within the 4096
+// bytes browsers accept per cookie; a larger Set-Cookie is silently dropped.
+const maxCookieValue = 4096 - len(cookieName) - 1
+
+// Image bookmarks are almost always pinimg URLs. Inside the cookie their
+// prefix is stored as "~": repeated in every entry, it alone made 30 image
+// bookmarks overflow the cookie size limit.
+const pinimgPrefix = "https://i.pinimg.com/"
+
+func compactBookmarks(entries []BookmarkEntry) []BookmarkEntry {
+	out := make([]BookmarkEntry, len(entries))
+	for i, e := range entries {
+		if e.Type == "img" && strings.HasPrefix(e.Value, pinimgPrefix) {
+			e.Value = "~" + strings.TrimPrefix(e.Value, pinimgPrefix)
+		}
+		out[i] = e
+	}
+	return out
+}
+
+func expandBookmarks(entries []BookmarkEntry) {
+	for i, e := range entries {
+		if e.Type == "img" && strings.HasPrefix(e.Value, "~") {
+			entries[i].Value = pinimgPrefix + strings.TrimPrefix(e.Value, "~")
+		}
+	}
+}
+
+// truncateUTF8 cuts s to at most n bytes without splitting a character.
+func truncateUTF8(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	for n > 0 && !utf8.RuneStart(s[n]) {
+		n--
+	}
+	return s[:n]
+}
+
+// bookmarksFull reports whether one more bookmark of the largest allowed size
+// would push the oldest ones out.
+func bookmarksFull(entries []BookmarkEntry) bool {
+	probe := append([]BookmarkEntry{{Type: "img", Value: strings.Repeat("x", maxItemLen)}}, entries...)
+	if len(probe) > maxBookmarks {
+		return true
+	}
+	enc, err := encryptBookmarks(probe)
+	return err == nil && len(enc) > maxCookieValue
+}
 
 // ---------- init: read env ----------
 func init() {
@@ -125,7 +176,7 @@ func encryptBookmarks(entries []BookmarkEntry) (string, error) {
 	if !bookmarkingEnabled {
 		return "", nil
 	}
-	plain, err := json.Marshal(entries)
+	plain, err := json.Marshal(compactBookmarks(entries))
 	if err != nil {
 		return "", err
 	}
@@ -174,6 +225,7 @@ func decryptBookmarks(encoded string) ([]BookmarkEntry, error) {
 	// try new format first ([]BookmarkEntry)
 	var entries []BookmarkEntry
 	if err := json.Unmarshal(plain, &entries); err == nil {
+		expandBookmarks(entries)
 		return entries, nil
 	}
 	// fallback to legacy []string
@@ -215,9 +267,7 @@ func setBookmarksCookie(w http.ResponseWriter, entries []BookmarkEntry) {
 		if v == "" {
 			continue
 		}
-		if len(v) > maxItemLen {
-			v = v[:maxItemLen]
-		}
+		v = truncateUTF8(v, maxItemLen)
 		if e.Type != "q" && e.Type != "img" {
 			e.Type = "q"
 		}
@@ -231,7 +281,13 @@ func setBookmarksCookie(w http.ResponseWriter, entries []BookmarkEntry) {
 			break
 		}
 	}
+	// Drop the oldest entries until the cookie fits: browsers reject a larger
+	// one, which used to lose the newest bookmark without a word.
 	enc, err := encryptBookmarks(out)
+	for err == nil && len(enc) > maxCookieValue && len(out) > 0 {
+		out = out[:len(out)-1]
+		enc, err = encryptBookmarks(out)
+	}
 	if err != nil {
 		return
 	}
@@ -570,7 +626,11 @@ func indexHandler(w http.ResponseWriter, r *http.Request) {
 	// bookmarks shown only on index
 	if bookmarkingEnabled {
 		items := readBookmarksFromReq(r)
-		_, _ = io.WriteString(w, `<div class="bookmarks"><div style="font-size:14px;color:var(--muted);margin-top:8px">Saved bookmarks</div><div class="bookmark-list">`)
+		_, _ = io.WriteString(w, `<div class="bookmarks"><div style="font-size:14px;color:var(--muted);margin-top:8px">Saved bookmarks (`+strconv.Itoa(len(items))+`)</div>`)
+		if bookmarksFull(items) {
+			_, _ = io.WriteString(w, `<div style="font-size:13px;color:var(--muted);margin-top:4px">Bookmark storage is nearly full: new saves may remove the oldest ones.</div>`)
+		}
+		_, _ = io.WriteString(w, `<div class="bookmark-list">`)
 		for _, e := range items {
 			escaped := html.EscapeString(e.Value)
 			if e.Type == "q" {
@@ -592,8 +652,12 @@ func indexHandler(w http.ResponseWriter, r *http.Request) {
 // searchHandler: streaming results, include inline style variables from cookies
 func searchHandler(w http.ResponseWriter, r *http.Request) {
 	q := strings.TrimSpace(r.URL.Query().Get("q"))
-	if len(q) < 1 || len(q) > 64 {
+	if q == "" {
 		http.Redirect(w, r, "/", http.StatusSeeOther)
+		return
+	}
+	if utf8.RuneCountInString(q) > maxQueryRunes {
+		renderErrorPage(w, r, http.StatusBadRequest, fmt.Sprintf("Searches can be up to %d characters long.", maxQueryRunes))
 		return
 	}
 	bookmark := r.URL.Query().Get("bookmark")
@@ -1452,7 +1516,7 @@ func bookmarkPostHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	q := strings.TrimSpace(r.FormValue("q"))
-	if q == "" || len(q) > 64 {
+	if q == "" || utf8.RuneCountInString(q) > maxQueryRunes {
 		http.Redirect(w, r, "/", http.StatusSeeOther)
 		return
 	}
@@ -1606,9 +1670,7 @@ func bookmarksImportHandler(w http.ResponseWriter, r *http.Request) {
 		if e.Value == "" {
 			continue
 		}
-		if len(e.Value) > maxItemLen {
-			e.Value = e.Value[:maxItemLen]
-		}
+		e.Value = truncateUTF8(e.Value, maxItemLen)
 		if e.Type != "q" && e.Type != "img" {
 			e.Type = "q"
 		}
