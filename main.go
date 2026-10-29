@@ -256,7 +256,14 @@ func readBookmarksFromReq(r *http.Request) []BookmarkEntry {
 	return entries
 }
 
-func setBookmarksCookie(w http.ResponseWriter, entries []BookmarkEntry) {
+// isHTTPS reports whether the client reached Pinata over HTTPS, directly or
+// through a reverse proxy that sets X-Forwarded-Proto. Cookies get the Secure
+// flag then, so plain-HTTP local testing keeps working.
+func isHTTPS(r *http.Request) bool {
+	return r.TLS != nil || strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https")
+}
+
+func setBookmarksCookie(w http.ResponseWriter, r *http.Request, entries []BookmarkEntry) {
 	if !bookmarkingEnabled {
 		return
 	}
@@ -297,18 +304,20 @@ func setBookmarksCookie(w http.ResponseWriter, entries []BookmarkEntry) {
 		Path:     "/",
 		HttpOnly: true,
 		SameSite: http.SameSiteLaxMode,
-		// Secure: true, // enable in production with HTTPS
-		MaxAge: 60 * 60 * 24 * 365 * 10,
+		Secure:   isHTTPS(r),
+		MaxAge:   60 * 60 * 24 * 365 * 10,
 	}
 	http.SetCookie(w, c)
 }
 
-func clearBookmarksCookie(w http.ResponseWriter) {
+func clearBookmarksCookie(w http.ResponseWriter, r *http.Request) {
 	c := &http.Cookie{
 		Name:     cookieName,
 		Value:    "",
 		Path:     "/",
 		HttpOnly: true,
+		SameSite: http.SameSiteLaxMode,
+		Secure:   isHTTPS(r),
 		MaxAge:   -1,
 	}
 	http.SetCookie(w, c)
@@ -392,7 +401,7 @@ func getThemeVars(r *http.Request) (string, string) {
 }
 
 // ---------- CSS (uses CSS vars; defaults are present but overridden per-request via inline style) ----------
-const cssContent = `:root{--bg:#0b0f17;--muted:#94a3b8;--text:#e6e6ff;--accent:#7c3aed;--accent-rgba:rgba(124,58,237,0.12);--img-scale:1}*{box-sizing:border-box}html,body{height:100%}body{margin:0;padding:20px;background:linear-gradient(180deg,#071020 0%,var(--bg) 100%);color:var(--text);font-family:ui-monospace,Menlo,Monaco,monospace}a{color:inherit}.header{display:flex;gap:12px;align-items:center;margin-bottom:18px;flex-wrap:wrap}.brand{font-size:20px;font-weight:700;color:var(--accent);text-decoration:none}.search-box{margin-left:auto;display:flex;gap:8px;align-items:center;flex:0 1 auto}.search-block{width:100%;display:flex;gap:8px;margin-top:14px}.search-inline{display:flex;gap:8px;align-items:center;min-width:0}input[type="text"]{background:transparent;border:1px solid rgba(255,255,255,0.06);padding:8px 12px;color:var(--text);min-width:120px;border-radius:8px;outline:none}button[type="submit"],.btn-save{background:linear-gradient(90deg,var(--accent),#5b21b6);color:white;border:none;padding:8px 12px;border-radius:8px;cursor:pointer}.btn-save{font-weight:600}.img-container{column-width:calc(260px * var(--img-scale));column-gap:16px;width:100%;max-width:1400px;margin-top:18px}.card{display:inline-block;width:100%;margin:0 0 16px;border-radius:10px;overflow:hidden;background:linear-gradient(180deg,rgba(255,255,255,0.01),rgba(255,255,255,0.02));box-shadow:0 6px 18px rgba(3,7,18,0.6);border:1px solid rgba(124,58,237,0.06);break-inside:avoid;-webkit-column-break-inside:avoid;-moz-column-break-inside:avoid;min-height:0;position:relative}.card img{display:block;width:100%;height:auto;object-fit:cover;background:#08101a}.card-controls{position:absolute;top:8px;right:8px;display:flex;gap:8px;align-items:center}.btn-save-mini{background:rgba(0,0,0,0.45);border:1px solid rgba(255,255,255,0.06);color:var(--text);padding:6px;border-radius:999px;cursor:pointer;font-weight:700;display:inline-flex;align-items:center;justify-content:center;width:34px;height:34px;text-decoration:none}.magnifier{background:rgba(0,0,0,0.45);border:1px solid rgba(255,255,255,0.06);color:var(--text);padding:6px;border-radius:999px;font-size:14px;width:34px;height:34px;display:inline-flex;align-items:center;justify-content:center;text-decoration:none}.bookmarks{margin-left:12px;color:var(--muted);font-size:14px}.bookmark-list{margin-top:10px;display:flex;gap:8px;flex-wrap:wrap}.bookmark-pill{background:rgba(255,255,255,0.03);padding:6px 8px;border-radius:999px;border:1px solid rgba(255,255,255,0.04);font-size:13px;display:flex;gap:6px;align-items:center}.bookmark-pill form{display:inline}.bookmark-remove-btn{background:transparent;border:none;color:#ff7b7b;font-weight:700;cursor:pointer;padding:0 6px}.export-form{margin-top:12px;display:flex;gap:8px;align-items:center}.pagination{text-align:center;margin:26px 0}.pagination a{color:var(--accent);text-decoration:none;padding:8px 12px;border-radius:8px;border:1px solid rgba(124,58,237,0.12);background:rgba(124,58,237,0.02)}.footer-note{color:var(--muted);font-size:12px;margin-top:22px}.pin{display:flex;gap:24px;align-items:flex-start;flex-wrap:wrap;margin-top:18px}.pin-media{flex:0 1 auto;max-width:100%}.pin-media img{display:block;max-width:100%;width:auto;height:auto;border-radius:10px;background:#08101a}@media (min-width:641px){.pin-media img{max-height:85vh}}.pin-info{flex:1 1 280px;max-width:560px}.pin-info h2{margin:0 0 10px}.pin-desc{white-space:pre-line;margin:0 0 12px}.pin-meta{color:var(--muted);font-size:14px;line-height:1.7;margin:0 0 12px}.pin-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap}@media (max-width:640px){body{padding:12px;font-size:18px}.brand{font-size:22px}input[type="text"]{min-width:120px;padding:12px 14px;font-size:16px}button[type="submit"],.btn-save{padding:10px 14px;font-size:16px;border-radius:10px}.img-container{column-width:calc(180px * var(--img-scale));column-gap:12px}.search-block{gap:10px;flex-direction:column}.search-inline{width:100%}.search-box{margin-left:0;width:100%}.bookmarks{order:3;width:100%;margin-top:8px}}`
+const cssContent = `:root{--bg:#0b0f17;--muted:#94a3b8;--text:#e6e6ff;--accent:#7c3aed;--accent-rgba:rgba(124,58,237,0.12);--img-scale:1}*{box-sizing:border-box}html,body{height:100%}body{margin:0;padding:20px;background:linear-gradient(180deg,#071020 0%,var(--bg) 100%);color:var(--text);font-family:ui-monospace,Menlo,Monaco,monospace}a{color:inherit}.header{display:flex;gap:12px;align-items:center;margin-bottom:18px;flex-wrap:wrap}.brand{font-size:20px;font-weight:700;color:var(--accent);text-decoration:none}.search-box{margin-left:auto;display:flex;gap:8px;align-items:center;flex:0 1 auto}.search-block{width:100%;display:flex;gap:8px;margin-top:14px}.search-inline{display:flex;gap:8px;align-items:center;min-width:0}input[type="text"]{background:transparent;border:1px solid rgba(255,255,255,0.06);padding:8px 12px;color:var(--text);min-width:120px;border-radius:8px;outline:none}button[type="submit"],.btn-save{background:linear-gradient(90deg,var(--accent),#5b21b6);color:white;border:none;padding:8px 12px;border-radius:8px;cursor:pointer}.btn-save{font-weight:600}.img-container{column-width:calc(260px * var(--img-scale));column-gap:16px;width:100%;max-width:1400px;margin-top:18px}.card{display:inline-block;width:100%;margin:0 0 16px;border-radius:10px;overflow:hidden;background:linear-gradient(180deg,rgba(255,255,255,0.01),rgba(255,255,255,0.02));box-shadow:0 6px 18px rgba(3,7,18,0.6);border:1px solid rgba(124,58,237,0.06);break-inside:avoid;-webkit-column-break-inside:avoid;-moz-column-break-inside:avoid;min-height:0;position:relative}.card img{display:block;width:100%;height:auto;object-fit:cover;background:#08101a}.card-controls{position:absolute;top:8px;right:8px;display:flex;gap:8px;align-items:center}.btn-save-mini{background:rgba(0,0,0,0.45);border:1px solid rgba(255,255,255,0.06);color:var(--text);padding:6px;border-radius:999px;cursor:pointer;font-weight:700;display:inline-flex;align-items:center;justify-content:center;width:34px;height:34px;text-decoration:none}.magnifier{background:rgba(0,0,0,0.45);border:1px solid rgba(255,255,255,0.06);color:var(--text);padding:6px;border-radius:999px;font-size:14px;width:34px;height:34px;display:inline-flex;align-items:center;justify-content:center;text-decoration:none}.bookmarks{margin-left:12px;color:var(--muted);font-size:14px}.bookmark-list{margin-top:10px;display:flex;gap:8px;flex-wrap:wrap}.bookmark-pill{background:rgba(255,255,255,0.03);padding:6px 8px;border-radius:999px;border:1px solid rgba(255,255,255,0.04);font-size:13px;display:flex;gap:6px;align-items:center}.bookmark-pill form{display:inline}.bookmark-remove-btn{background:transparent;border:none;color:#ff7b7b;font-weight:700;cursor:pointer;padding:0 6px}.export-form{margin-top:12px;display:flex;gap:8px;align-items:center}.pagination{text-align:center;margin:26px 0}.pagination a{color:var(--accent);text-decoration:none;padding:8px 12px;border-radius:8px;border:1px solid rgba(124,58,237,0.12);background:rgba(124,58,237,0.02)}.footer-note{color:var(--muted);font-size:12px;margin-top:22px}.pin{display:flex;gap:24px;align-items:flex-start;flex-wrap:wrap;margin-top:18px}.pin-media{flex:0 1 auto;max-width:100%}.pin-media img{display:block;max-width:100%;width:auto;height:auto;border-radius:10px;background:#08101a}@media (min-width:641px){.pin-media img{max-height:85vh}}.pin-info{flex:1 1 280px;max-width:560px}.pin-info h2{margin:0 0 10px}.pin-desc{white-space:pre-line;margin:0 0 12px}.pin-meta{color:var(--muted);font-size:14px;line-height:1.7;margin:0 0 12px}.pin-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.save-frame{display:block;width:34px;height:34px;border:0;background:transparent;overflow:hidden}.save-frame-q{width:96px;height:36px;margin-left:8px}@media (max-width:640px){body{padding:12px;font-size:18px}.brand{font-size:22px}input[type="text"]{min-width:120px;padding:12px 14px;font-size:16px}button[type="submit"],.btn-save{padding:10px 14px;font-size:16px;border-radius:10px}.img-container{column-width:calc(180px * var(--img-scale));column-gap:12px}.search-block{gap:10px;flex-direction:column}.search-inline{width:100%}.search-box{margin-left:0;width:100%}.bookmarks{order:3;width:100%;margin-top:8px}}`
 
 // ---------- handlers ----------
 
@@ -430,22 +439,28 @@ func settingsPostHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	// set cookies (non-encrypted, not sensitive)
 	http.SetCookie(w, &http.Cookie{
-		Name:   "pinata_accent",
-		Value:  accent,
-		Path:   "/",
-		MaxAge: 60 * 60 * 24 * 365 * 5,
+		Name:     "pinata_accent",
+		Value:    accent,
+		Path:     "/",
+		HttpOnly: true,
+		SameSite: http.SameSiteLaxMode,
+		Secure:   isHTTPS(r),
+		MaxAge:   60 * 60 * 24 * 365 * 5,
 	})
 	http.SetCookie(w, &http.Cookie{
-		Name:   "pinata_img_scale",
-		Value:  strconv.Itoa(percent),
-		Path:   "/",
-		MaxAge: 60 * 60 * 24 * 365 * 5,
+		Name:     "pinata_img_scale",
+		Value:    strconv.Itoa(percent),
+		Path:     "/",
+		HttpOnly: true,
+		SameSite: http.SameSiteLaxMode,
+		Secure:   isHTTPS(r),
+		MaxAge:   60 * 60 * 24 * 365 * 5,
 	})
 	next := safeNext(r.FormValue("next"))
 	http.Redirect(w, r, next, http.StatusSeeOther)
 }
 
-func renderCardHTML(next string, r *searchResult, href string, thumbMobile, thumbDesktop, thumbHigh int) string {
+func renderCardHTML(r *searchResult, href string, thumbMobile, thumbDesktop, thumbHigh int) string {
 	full := fullImage(r.Images.Orig, r.Images.X736)
 	u := full.URL
 	if href == "" {
@@ -503,12 +518,7 @@ func renderCardHTML(next string, r *searchResult, href string, thumbMobile, thum
 		b.WriteString(`" title="Search Tineye" target="_blank">🔍</a>`)
 	}
 	if bookmarkingEnabled {
-		b.WriteString(`<form method="post" action="/bookmark_image" style="display:inline;margin:0;">`)
-		b.WriteString(`<input type="hidden" name="url" value="`)
-		b.WriteString(html.EscapeString(u))
-		b.WriteString(`"><input type="hidden" name="next" value="`)
-		b.WriteString(html.EscapeString(next))
-		b.WriteString(`"><button class="btn-save-mini" type="submit" title="Save image">❤</button></form>`)
+		b.WriteString(saveFrameTag("img", u))
 	}
 	b.WriteString(`</div></div>`)
 	return b.String()
@@ -583,6 +593,21 @@ func (e *errorPageWriter) Write(b []byte) (int, error) {
 		return len(b), nil
 	}
 	return e.ResponseWriter.Write(b)
+}
+
+// securityHeaders locks every response down. Pinata ships no JavaScript,
+// embeds nothing from other sites and serves all its images itself, so the
+// policy can be strict: inline styles are the only exception. Frames are
+// allowed from the instance itself only, for the save button frames.
+func securityHeaders(next http.Handler) http.Handler {
+	const csp = "default-src 'none'; img-src 'self'; style-src 'unsafe-inline'; form-action 'self'; frame-src 'self'; frame-ancestors 'self'; base-uri 'none'"
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		h := w.Header()
+		h.Set("Content-Security-Policy", csp)
+		h.Set("X-Content-Type-Options", "nosniff")
+		h.Set("Referrer-Policy", "no-referrer")
+		next.ServeHTTP(w, r)
+	})
 }
 
 // withErrorPages serves mux, using the styled error page for requests that
@@ -723,8 +748,7 @@ func searchHandler(w http.ResponseWriter, r *http.Request) {
 	_, _ = io.WriteString(w, `<div class="header" style="margin-bottom:8px;"><a class="brand" href="/">Pinata</a><div class="search-box">`)
 	_, _ = io.WriteString(w, `<form class="search-inline" method="get" action="/search"><input type="text" name="q" value="`+html.EscapeString(q)+`" maxlength="64"><button type="submit">Search</button></form>`)
 	if bookmarkingEnabled {
-		next := "/search?q=" + url.QueryEscape(q)
-		_, _ = io.WriteString(w, `<form method="post" action="/bookmark" style="margin-left:8px;"><input type="hidden" name="q" value="`+html.EscapeString(q)+`"><input type="hidden" name="next" value="`+html.EscapeString(next)+`"><button class="btn-save" type="submit">Save</button></form>`)
+		_, _ = io.WriteString(w, saveFrameTag("q", q))
 	}
 	_, _ = io.WriteString(w, `</div></div>`)
 	_, _ = io.WriteString(w, `<h2 style="margin:4px 0 0 0;">Results for "`+html.EscapeString(q)+`"</h2>`)
@@ -732,7 +756,6 @@ func searchHandler(w http.ResponseWriter, r *http.Request) {
 
 	dec := json.NewDecoder(resp.Body)
 	var nextBookmark string
-	nextSearch := "/search?q=" + url.QueryEscape(q)
 	shown := 0
 
 	for {
@@ -772,7 +795,7 @@ func searchHandler(w http.ResponseWriter, r *http.Request) {
 					continue
 				}
 				shown++
-				_, _ = io.WriteString(w, renderCardHTML(nextSearch, &rObj, cardHref(&rObj), thumbMobile, thumbDesktop, thumbHigh))
+				_, _ = io.WriteString(w, renderCardHTML(&rObj, cardHref(&rObj), thumbMobile, thumbDesktop, thumbHigh))
 				if f, ok := w.(http.Flusher); ok {
 					f.Flush()
 				}
@@ -934,7 +957,6 @@ type pinCard struct {
 
 // pinView is everything the pin page renders, whatever the data source.
 type pinView struct {
-	Self       string // this page's path, for "next" after saving
 	Title      string
 	Desc       string
 	Orig       string
@@ -1089,7 +1111,7 @@ func pinHandler(w http.ResponseWriter, r *http.Request) {
 		q := r.URL.Query()
 		if c, ok := openPinCard(id, q.Get("d"), q.Get("s")); ok {
 			renderPinPage(w, r, pinView{
-				Self: r.URL.RequestURI(), Title: c.T, Desc: c.D, Orig: c.O, Width: c.W, Height: c.H, Alt: c.A,
+				Title: c.T, Desc: c.D, Orig: c.O, Width: c.W, Height: c.H, Alt: c.A,
 				Domain: c.M, PinnerUser: c.U, PinnerName: c.N, Board: c.B, CreatedAt: c.C, Saves: c.S, IsVideo: c.V,
 			})
 			return
@@ -1139,7 +1161,7 @@ func pinFromPinterest(w http.ResponseWriter, r *http.Request, id string) {
 		return
 	}
 	v := pinView{
-		Self: "/pin/" + id, Title: p.Title, Desc: firstNonEmpty(p.CloseupDescription, p.Description),
+		Title: p.Title, Desc: firstNonEmpty(p.CloseupDescription, p.Description),
 		Orig: orig.URL, Width: orig.Width, Height: orig.Height, Alt: firstNonEmpty(p.AltText, p.AutoAltText),
 		SourceURL: p.Link, Domain: p.Domain, CreatedAt: p.CreatedAt, IsVideo: p.IsVideo,
 	}
@@ -1219,7 +1241,7 @@ func renderPinPage(w http.ResponseWriter, r *http.Request, v pinView) {
 		b.WriteString(`<a class="magnifier" href="/revsearch?b64=` + base64.StdEncoding.EncodeToString([]byte(v.Orig)) + `" title="Search Tineye" target="_blank">🔍</a>`)
 	}
 	if bookmarkingEnabled {
-		b.WriteString(`<form method="post" action="/bookmark_image" style="display:inline;margin:0;"><input type="hidden" name="url" value="` + html.EscapeString(v.Orig) + `"><input type="hidden" name="next" value="` + html.EscapeString(v.Self) + `"><button class="btn-save-mini" type="submit" title="Save image">❤</button></form>`)
+		b.WriteString(saveFrameTag("img", v.Orig))
 	}
 	b.WriteString(`<a class="btn-save" href="` + html.EscapeString(full) + `" target="_blank" rel="noreferrer" style="text-decoration:none;">Full size</a>`)
 	b.WriteString(`</div></div></div></body></html>`)
@@ -1506,64 +1528,110 @@ func revsearchHandler(w http.ResponseWriter, r *http.Request) {
 
 // ---------- bookmark handlers ----------
 
-func bookmarkPostHandler(w http.ResponseWriter, r *http.Request) {
-	if !bookmarkingEnabled {
-		http.Redirect(w, r, "/", http.StatusSeeOther)
-		return
+// The save buttons on cards, pin pages and search pages are small iframes
+// served by /frame/save. Saving or removing posts inside the frame and
+// reloads only the frame, which comes back in its new state: the page isn't
+// reloaded, keeps its place, and Pinterest isn't asked for the search again.
+
+// saveTarget validates what a save button stores: a pinimg image URL or a
+// search query.
+func saveTarget(typ, v string) (string, bool) {
+	v = strings.TrimSpace(v)
+	switch typ {
+	case "img":
+		return v, len(v) <= maxItemLen && isPinimgURL(v)
+	case "q":
+		return v, v != "" && utf8.RuneCountInString(v) <= maxQueryRunes
 	}
-	if err := r.ParseForm(); err != nil {
-		http.Redirect(w, r, "/", http.StatusSeeOther)
-		return
-	}
-	q := strings.TrimSpace(r.FormValue("q"))
-	if q == "" || utf8.RuneCountInString(q) > maxQueryRunes {
-		http.Redirect(w, r, "/", http.StatusSeeOther)
-		return
-	}
-	next := safeNext(r.FormValue("next"))
-	entries := readBookmarksFromReq(r)
-	new := []BookmarkEntry{{Type: "q", Value: q}}
-	for _, e := range entries {
-		if e.Type == "q" && e.Value == q {
-			continue
-		}
-		new = append(new, e)
-		if len(new) >= maxBookmarks {
-			break
-		}
-	}
-	setBookmarksCookie(w, new)
-	http.Redirect(w, r, next, http.StatusSeeOther)
+	return "", false
 }
 
-func bookmarkImagePostHandler(w http.ResponseWriter, r *http.Request) {
+func saveFrameURL(typ, v string) string {
+	return "/frame/save?type=" + url.QueryEscape(typ) + "&v=" + url.QueryEscape(v)
+}
+
+// saveFrameTag returns the iframe that embeds a save button.
+func saveFrameTag(typ, v string) string {
+	class, title := "save-frame", "Save image"
+	if typ == "q" {
+		class, title = "save-frame save-frame-q", "Save search"
+	}
+	return `<iframe class="` + class + `" src="` + html.EscapeString(saveFrameURL(typ, v)) + `" title="` + title + `" loading="lazy" scrolling="no"></iframe>`
+}
+
+func saveFrameHandler(w http.ResponseWriter, r *http.Request) {
 	if !bookmarkingEnabled {
-		http.Redirect(w, r, "/", http.StatusSeeOther)
+		http.Error(w, "bookmarks disabled", http.StatusNotFound)
 		return
 	}
-	if err := r.ParseForm(); err != nil {
-		http.Redirect(w, r, "/", http.StatusSeeOther)
+	typ := r.URL.Query().Get("type")
+	v, ok := saveTarget(typ, r.URL.Query().Get("v"))
+	if !ok {
+		http.Error(w, "invalid bookmark", http.StatusBadRequest)
 		return
 	}
-	u := strings.TrimSpace(r.FormValue("url"))
-	if u == "" || !(strings.HasPrefix(u, "http://") || strings.HasPrefix(u, "https://")) {
-		http.Redirect(w, r, "/", http.StatusSeeOther)
-		return
-	}
-	next := safeNext(r.FormValue("next"))
-	entries := readBookmarksFromReq(r)
-	new := []BookmarkEntry{{Type: "img", Value: u}}
-	for _, e := range entries {
-		if e.Type == "img" && e.Value == u {
-			continue
-		}
-		new = append(new, e)
-		if len(new) >= maxBookmarks {
+	saved := false
+	for _, e := range readBookmarksFromReq(r) {
+		if e.Type == typ && e.Value == v {
+			saved = true
 			break
 		}
 	}
-	setBookmarksCookie(w, new)
-	http.Redirect(w, r, next, http.StatusSeeOther)
+	accent, _ := getThemeVars(r)
+	action, label, title, class := "add", "❤", "Save image", "heart"
+	if typ == "q" {
+		label, title, class = "Save", "Save search", "text"
+	}
+	if saved {
+		action, title, class = "remove", "Remove from bookmarks", class+" saved"
+		if typ == "q" {
+			label = "Saved ✓"
+		}
+	}
+	css := `html,body{margin:0;padding:0;background:transparent;overflow:hidden}form{margin:0}button{cursor:pointer;font:700 14px ui-monospace,Menlo,Monaco,monospace;display:inline-flex;align-items:center;justify-content:center}` +
+		`.heart{width:34px;height:34px;padding:0;border-radius:999px;background:rgba(0,0,0,0.45);border:1px solid rgba(255,255,255,0.06);color:#e6e6ff;font-size:15px}` +
+		`.heart.saved{color:#ff4d6d;background:rgba(255,77,109,0.18);border-color:rgba(255,77,109,0.55)}` +
+		`.text{height:36px;width:96px;border:none;border-radius:8px;color:#fff;background:linear-gradient(90deg,` + html.EscapeString(accent) + `,#5b21b6)}` +
+		`.text.saved{background:rgba(255,255,255,0.08);border:1px solid ` + html.EscapeString(accent) + `}`
+
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
+	_, _ = io.WriteString(w, `<!doctype html><html><head><meta charset="utf-8"><style>`+css+`</style></head><body>`+
+		`<form method="post" action="/frame/save"><input type="hidden" name="type" value="`+html.EscapeString(typ)+`"><input type="hidden" name="v" value="`+html.EscapeString(v)+`"><input type="hidden" name="action" value="`+action+`">`+
+		`<button type="submit" class="`+class+`" title="`+title+`">`+label+`</button></form></body></html>`)
+}
+
+func saveFramePostHandler(w http.ResponseWriter, r *http.Request) {
+	if !bookmarkingEnabled {
+		http.Error(w, "bookmarks disabled", http.StatusNotFound)
+		return
+	}
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "invalid form", http.StatusBadRequest)
+		return
+	}
+	typ := r.PostFormValue("type")
+	v, ok := saveTarget(typ, r.PostFormValue("v"))
+	if !ok {
+		http.Error(w, "invalid bookmark", http.StatusBadRequest)
+		return
+	}
+	out := make([]BookmarkEntry, 0, maxBookmarks)
+	if r.PostFormValue("action") == "add" {
+		out = append(out, BookmarkEntry{Type: typ, Value: v})
+	}
+	for _, e := range readBookmarksFromReq(r) {
+		if e.Type == typ && e.Value == v {
+			continue
+		}
+		out = append(out, e)
+	}
+	if len(out) == 0 {
+		clearBookmarksCookie(w, r)
+	} else {
+		setBookmarksCookie(w, r, out)
+	}
+	http.Redirect(w, r, saveFrameURL(typ, v), http.StatusSeeOther)
 }
 
 func bookmarkRemoveHandler(w http.ResponseWriter, r *http.Request) {
@@ -1590,9 +1658,9 @@ func bookmarkRemoveHandler(w http.ResponseWriter, r *http.Request) {
 		out = append(out, e)
 	}
 	if len(out) == 0 {
-		clearBookmarksCookie(w)
+		clearBookmarksCookie(w, r)
 	} else {
-		setBookmarksCookie(w, out)
+		setBookmarksCookie(w, r, out)
 	}
 	http.Redirect(w, r, "/", http.StatusSeeOther)
 }
@@ -1685,7 +1753,7 @@ func bookmarksImportHandler(w http.ResponseWriter, r *http.Request) {
 			break
 		}
 	}
-	setBookmarksCookie(w, merged)
+	setBookmarksCookie(w, r, merged)
 	http.Redirect(w, r, "/", http.StatusSeeOther)
 }
 
@@ -1702,8 +1770,8 @@ func main() {
 	mux.HandleFunc("GET /thumb_proxy", thumbImageProxyHandler)
 
 	// bookmark endpoints: anything that changes state is POST-only
-	mux.HandleFunc("POST /bookmark", bookmarkPostHandler)
-	mux.HandleFunc("POST /bookmark_image", bookmarkImagePostHandler)
+	mux.HandleFunc("GET /frame/save", saveFrameHandler)
+	mux.HandleFunc("POST /frame/save", saveFramePostHandler)
 	mux.HandleFunc("POST /bookmark_remove", bookmarkRemoveHandler)
 	mux.HandleFunc("GET /bookmarks/export", bookmarksExportHandler)
 	mux.HandleFunc("POST /bookmarks/import", bookmarksImportHandler)
@@ -1717,7 +1785,7 @@ func main() {
 
 	server := &http.Server{
 		Addr:         ":8080",
-		Handler:      csrf.Handler(withErrorPages(mux)),
+		Handler:      securityHeaders(csrf.Handler(withErrorPages(mux))),
 		ReadTimeout:  12 * time.Second,
 		WriteTimeout: 30 * time.Second,
 		IdleTimeout:  60 * time.Second,
