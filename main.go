@@ -199,9 +199,18 @@ func truncateUTF8(s string, n int) string {
 
 // bookmarksFull reports whether one more bookmark the size of a typical pin
 // would push the oldest ones out.
+var bookmarkProbe = func() string {
+	b := make([]byte, 393) // 524 base64 characters
+	for i := range b {
+		b[i] = byte(i*131 + i*i*7 + i>>3) // fixed, but with no patterns deflate finds
+	}
+	return base64.RawURLEncoding.EncodeToString(b)
+}()
+
 func bookmarksFull(entries []BookmarkEntry) bool {
-	// Most bookmarks are pins: probe with the longest measured pin link.
-	probe := append([]BookmarkEntry{{Type: "pin", Value: strings.Repeat("x", 524)}}, entries...)
+	// Most bookmarks are pins: probe with the longest measured pin link. Its
+	// text is base64 like a real one, so it compresses about as well.
+	probe := append([]BookmarkEntry{{Type: "pin", Value: bookmarkProbe}}, entries...)
 	if len(probe) > maxBookmarks {
 		return true
 	}
@@ -254,11 +263,39 @@ func init() {
 }
 
 // ---------- encryption helpers (AES-GCM) ----------
+// packedBookmarks marks a compressed cookie payload. Older cookies hold the
+// JSON itself, which starts with "[" and is still read.
+const packedBookmarks = 0x01
+
+// packBookmarks serializes the bookmarks for the cookie: compact JSON,
+// deflated. Pin links are base64 text, which deflate shrinks by about a
+// quarter, so the cookie holds more pins within the same size.
+func packBookmarks(entries []BookmarkEntry) ([]byte, error) {
+	var js bytes.Buffer
+	enc := json.NewEncoder(&js)
+	enc.SetEscapeHTML(false) // keeps "&" in pin links as one byte
+	if err := enc.Encode(compactBookmarks(entries)); err != nil {
+		return nil, err
+	}
+	out := bytes.NewBuffer([]byte{packedBookmarks})
+	fw, err := flate.NewWriter(out, flate.BestCompression)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := fw.Write(js.Bytes()); err != nil {
+		return nil, err
+	}
+	if err := fw.Close(); err != nil {
+		return nil, err
+	}
+	return out.Bytes(), nil
+}
+
 func encryptBookmarks(entries []BookmarkEntry) (string, error) {
 	if !bookmarkingEnabled {
 		return "", nil
 	}
-	plain, err := json.Marshal(compactBookmarks(entries))
+	plain, err := packBookmarks(entries)
 	if err != nil {
 		return "", err
 	}
@@ -303,6 +340,11 @@ func decryptBookmarks(encoded string) ([]BookmarkEntry, error) {
 	plain, err := gcm.Open(nil, nonce, ct, nil)
 	if err != nil {
 		return nil, err
+	}
+	if len(plain) > 0 && plain[0] == packedBookmarks {
+		if plain, err = io.ReadAll(io.LimitReader(flate.NewReader(bytes.NewReader(plain[1:])), 64<<10)); err != nil {
+			return nil, err
+		}
 	}
 	// try new format first ([]BookmarkEntry)
 	var entries []BookmarkEntry
