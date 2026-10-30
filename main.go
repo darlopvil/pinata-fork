@@ -22,10 +22,12 @@ import (
 	"io"
 	"log"
 	"math"
+	"mime"
 	"net"
 	"net/http"
 	"net/url"
 	"os"
+	"path"
 	"strconv"
 	"strings"
 	"sync"
@@ -622,8 +624,9 @@ func settingsPostHandler(w http.ResponseWriter, r *http.Request) {
 func renderCardHTML(st *saveState, r *searchResult, href string, thumbMobile, thumbDesktop, thumbHigh int) string {
 	full := fullImage(r.Images.Orig, r.Images.X736)
 	u := full.URL
+	name := firstNonEmpty(r.Title, r.GridTitle, r.Description)
 	if href == "" {
-		href = "/image_proxy?url=" + url.QueryEscape(u)
+		href = imageProxyURL(u, name)
 	}
 	// Thumbnails are resized from Pinterest's JPEG variants rather than the
 	// original: GIF and HEIC originals weigh megabytes, and the image proxy
@@ -657,7 +660,7 @@ func renderCardHTML(st *saveState, r *searchResult, href string, thumbMobile, th
 	b.WriteString(`" style="display:block;" target="_blank" rel="noreferrer"><img loading="lazy" decoding="async" src="`)
 	if strings.HasSuffix(strings.ToLower(u), ".gif") {
 		// GIF cards show the animated original instead of a resized JPEG.
-		b.WriteString(html.EscapeString("/image_proxy?url=" + url.QueryEscape(u)))
+		b.WriteString(html.EscapeString(imageProxyURL(u, name)))
 	} else {
 		b.WriteString(html.EscapeString(td))
 		b.WriteString(`" srcset="`)
@@ -1393,7 +1396,7 @@ func renderPinPage(w http.ResponseWriter, r *http.Request, v pinView) {
 	}
 	title := firstNonEmpty(heading, truncateRunes(desc, 80), "Pin")
 	alt := firstNonEmpty(v.Alt, title)
-	full := "/image_proxy?url=" + url.QueryEscape(v.Orig)
+	full := imageProxyURL(v.Orig, firstNonEmpty(heading, desc))
 
 	var b strings.Builder
 	b.WriteString(pageHead(r, title+" - Pinata"))
@@ -1454,6 +1457,32 @@ func renderPinPage(w http.ResponseWriter, r *http.Request, v pinView) {
 }
 
 // ---------- secure image proxy (only https i.pinimg.com) ----------
+// imageProxyURL links an image through /image_proxy. A name, when known,
+// becomes the file name browsers save the image as.
+func imageProxyURL(u, name string) string {
+	s := "/image_proxy?url=" + url.QueryEscape(u)
+	if name = downloadName(name); name != "" {
+		s += "&name=" + url.QueryEscape(name)
+	}
+	return s
+}
+
+// downloadName turns a pin title or description into a file name: one line,
+// no characters file systems reject, at most 80 characters.
+func downloadName(s string) string {
+	s = strings.Map(func(c rune) rune {
+		if c < 0x20 || c == 0x7f || strings.ContainsRune(`/\:*?"<>|`, c) {
+			return ' '
+		}
+		return c
+	}, s)
+	s = strings.Join(strings.Fields(s), " ")
+	if r := []rune(s); len(r) > 80 {
+		s = string(r[:80])
+	}
+	return strings.Trim(s, " .")
+}
+
 func imageProxyHandler(w http.ResponseWriter, r *http.Request) {
 	uq := r.URL.Query().Get("url")
 	if uq == "" {
@@ -1508,6 +1537,18 @@ func imageProxyHandler(w http.ResponseWriter, r *http.Request) {
 	for _, h := range []string{"Content-Type", "Cache-Control", "ETag", "Last-Modified"} {
 		if v := resp.Header.Get(h); v != "" {
 			w.Header().Set(h, v)
+		}
+	}
+	// Without this, browsers save every image as "image_proxy".
+	if resp.StatusCode == http.StatusOK {
+		base := path.Base(parsed.Path)
+		ext := path.Ext(base)
+		name := downloadName(r.URL.Query().Get("name"))
+		if name == "" {
+			name = strings.TrimSuffix(base, ext)
+		}
+		if cd := mime.FormatMediaType("inline", map[string]string{"filename": name + ext}); cd != "" {
+			w.Header().Set("Content-Disposition", cd)
 		}
 	}
 
