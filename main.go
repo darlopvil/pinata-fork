@@ -32,6 +32,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 	"unicode/utf8"
 )
 
@@ -801,6 +802,94 @@ func renderErrorPage(w http.ResponseWriter, r *http.Request, code int, msg strin
 	_, _ = io.WriteString(w, pageHead(r, title+" - Pinata"))
 	_, _ = io.WriteString(w, `<div class="header"><a class="brand" href="/">Pinata</a>`+gearLink(r)+`</div>`)
 	_, _ = io.WriteString(w, `<h2 style="margin:4px 0 8px 0;">`+html.EscapeString(title)+`</h2><p style="color:var(--muted);">`+html.EscapeString(msg)+`</p><p><a href="/">Back to search</a></p>`+footerHTML)
+}
+
+// ---------- Pinterest's own paths ----------
+// A redirect rule that only swaps pinterest.com for the instance's host sends
+// Pinterest's paths as they are; these handlers take them where they belong.
+
+// pinterestSearchHandler takes /search/pins/?q=... (and /search/?q=...,
+// /search/boards/?q=...) to Pinata's search.
+func pinterestSearchHandler(w http.ResponseWriter, r *http.Request) {
+	q := strings.TrimSpace(r.URL.Query().Get("q"))
+	if q == "" {
+		http.Redirect(w, r, "/", http.StatusFound)
+		return
+	}
+	http.Redirect(w, r, "/search?q="+url.QueryEscape(q), http.StatusFound)
+}
+
+// slugWords turns a Pinterest URL slug ("camel-trophy") into search words.
+func slugWords(slug string) string {
+	return strings.Join(strings.Fields(strings.ReplaceAll(slug, "-", " ")), " ")
+}
+
+// ideasHandler takes an ideas page (/ideas/<topic>/<id>/) to a search for its
+// topic: ideas pages are Pinterest's own searches for that topic.
+func ideasHandler(w http.ResponseWriter, r *http.Request) {
+	q := slugWords(r.PathValue("slug"))
+	if q == "" || utf8.RuneCountInString(q) > maxQueryRunes {
+		http.Redirect(w, r, "/", http.StatusFound)
+		return
+	}
+	http.Redirect(w, r, "/search?q="+url.QueryEscape(q), http.StatusFound)
+}
+
+// isPinterestUser reports whether s can be a Pinterest username: ASCII
+// letters, digits and underscores. That keeps files like /robots.txt out.
+func isPinterestUser(s string) bool {
+	if s == "" || len(s) > 50 {
+		return false
+	}
+	for _, c := range s {
+		if !(c == '_' || c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9') {
+			return false
+		}
+	}
+	return true
+}
+
+// isBoardSlug reports whether s can be a board slug: letters (any script),
+// digits, hyphens and underscores.
+func isBoardSlug(s string) bool {
+	if s == "" || len(s) > 200 {
+		return false
+	}
+	for _, c := range s {
+		if !(c == '_' || c == '-' || unicode.IsLetter(c) || unicode.IsDigit(c)) {
+			return false
+		}
+	}
+	return true
+}
+
+// profileHandler answers profile and board paths (/<user>/, /<user>/<board>/)
+// until Pinata can show them: instead of a bare 404, it says so and, for a
+// board, offers a search for the board's name.
+func profileHandler(w http.ResponseWriter, r *http.Request) {
+	user, board := r.PathValue("user"), r.PathValue("board")
+	if !isPinterestUser(user) || (board != "" && !isBoardSlug(board)) {
+		renderErrorPage(w, r, http.StatusNotFound, "There's nothing at this address.")
+		return
+	}
+	heading, msg, search := "This page isn't supported yet", "Pinata can show Pinterest searches and pins, but not profiles or other pages yet.", ""
+	if board != "" && !strings.HasPrefix(board, "_") { // "_created", "_saved" are profile tabs
+		heading, msg = "Boards aren't supported yet", "Pinata can show Pinterest searches and pins, but not boards yet."
+		if q := slugWords(board); q != "" && utf8.RuneCountInString(q) <= maxQueryRunes {
+			search = q
+		}
+	}
+	title := fmt.Sprintf("%d %s", http.StatusNotImplemented, http.StatusText(http.StatusNotImplemented))
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
+	w.WriteHeader(http.StatusNotImplemented)
+	_, _ = io.WriteString(w, pageHead(r, title+" - Pinata"))
+	_, _ = io.WriteString(w, `<div class="header"><a class="brand" href="/">Pinata</a>`+gearLink(r)+`</div>`)
+	_, _ = io.WriteString(w, `<h2 style="margin:4px 0 8px 0;">`+heading+`</h2><p style="color:var(--muted);">`+msg+`</p>`)
+	if search != "" {
+		_, _ = io.WriteString(w, `<p><a href="/search?q=`+url.QueryEscape(search)+`">Search for "`+html.EscapeString(search)+`"</a></p>`)
+	}
+	_, _ = io.WriteString(w, `<p><a href="/">Back to search</a></p>`+footerHTML)
 }
 
 // renderFetchError logs a failed Pinterest request and renders a 502. Only the
@@ -2194,6 +2283,12 @@ func main() {
 	mux.HandleFunc("GET /search", searchHandler)
 	mux.HandleFunc("GET /pin/{id}", pinHandler)
 	mux.HandleFunc("GET /pin/{id}/{$}", pinHandler)
+	mux.HandleFunc("GET /search/{$}", pinterestSearchHandler)
+	mux.HandleFunc("GET /search/{scope}/{$}", pinterestSearchHandler)
+	mux.HandleFunc("GET /ideas/{slug}/{$}", ideasHandler)
+	mux.HandleFunc("GET /ideas/{slug}/{id}/{$}", ideasHandler)
+	mux.HandleFunc("GET /{user}/{$}", profileHandler)
+	mux.HandleFunc("GET /{user}/{board}/{rest...}", profileHandler)
 	mux.HandleFunc("GET /image_proxy", imageProxyHandler)
 	mux.HandleFunc("GET /revsearch", revsearchHandler)
 	mux.HandleFunc("GET /thumb_proxy", thumbImageProxyHandler)
