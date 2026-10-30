@@ -602,6 +602,19 @@ func settingsPostHandler(w http.ResponseWriter, r *http.Request) {
 		Secure:   isHTTPS(r),
 		MaxAge:   60 * 60 * 24 * 365 * 5,
 	})
+	for _, e := range reverseEngines {
+		if e.Key == r.FormValue("revsearch") {
+			http.SetCookie(w, &http.Cookie{
+				Name:     reverseCookie,
+				Value:    e.Key,
+				Path:     "/",
+				HttpOnly: true,
+				SameSite: http.SameSiteLaxMode,
+				Secure:   isHTTPS(r),
+				MaxAge:   60 * 60 * 24 * 365 * 5,
+			})
+		}
+	}
 	next := safeNext(r.FormValue("next"))
 	http.Redirect(w, r, next, http.StatusSeeOther)
 }
@@ -663,7 +676,7 @@ func renderCardHTML(r *searchResult, href string, thumbMobile, thumbDesktop, thu
 	if !disableReverse {
 		b.WriteString(`<a class="magnifier" href="/revsearch?b64=`)
 		b.WriteString(base64.StdEncoding.EncodeToString([]byte(u)))
-		b.WriteString(`" title="Search Tineye" target="_blank">🔍</a>`)
+		b.WriteString(`" title="Reverse image search" target="_blank">🔍</a>`)
 	}
 	if bookmarkingEnabled {
 		b.WriteString(pinSaveFrame(href, u))
@@ -794,6 +807,18 @@ func indexHandler(w http.ResponseWriter, r *http.Request) {
 		_, _ = io.WriteString(w, `<option value="`+strconv.Itoa(v)+`"`+sel+`>`+strconv.Itoa(v)+`%</option>`)
 	}
 	_, _ = io.WriteString(w, `</select></label>`)
+	if !disableReverse {
+		_, _ = io.WriteString(w, `<label style="font-size:14px;color:var(--muted);">Reverse image search: <select name="revsearch" style="margin-left:6px;">`)
+		cur := reverseEngine(r)
+		for i, e := range reverseEngines {
+			sel := ""
+			if i == cur {
+				sel = ` selected`
+			}
+			_, _ = io.WriteString(w, `<option value="`+e.Key+`"`+sel+`>`+e.Name+`</option>`)
+		}
+		_, _ = io.WriteString(w, `</select></label>`)
+	}
 	_, _ = io.WriteString(w, `<input type="hidden" name="next" value="/"><button type="submit" class="btn-save">Apply</button></form></div>`)
 
 	// bookmarks shown only on index
@@ -840,7 +865,7 @@ func indexHandler(w http.ResponseWriter, r *http.Request) {
 		_, _ = io.WriteString(w, `</div>`)
 	}
 
-	_, _ = io.WriteString(w, `<div class="footer-note">Powered by Pinata • Reverse image search uses Tineye • <a href="https://codeberg.org/gigirassy/pinata/">Contribute to this code or host your own instance!</a></div></body></html>`)
+	_, _ = io.WriteString(w, `<div class="footer-note">Powered by Pinata • <a href="https://codeberg.org/gigirassy/pinata/">Contribute to this code or host your own instance!</a></div></body></html>`)
 }
 
 // searchHandler: streaming results, include inline style variables from cookies
@@ -998,7 +1023,7 @@ func searchHandler(w http.ResponseWriter, r *http.Request) {
 		next := "/search?q=" + qenc + "&bookmark=" + benc + cenc
 		_, _ = io.WriteString(w, `<div class="pagination"><a href="`+html.EscapeString(next)+`">Next page</a></div>`)
 	}
-	_, _ = io.WriteString(w, `<div class="footer-note">Powered by Pinata • Reverse image search uses Tineye • <a href="https://codeberg.org/gigirassy/pinata/">Contribute to this code or host your own instance!</a></div></body></html>`)
+	_, _ = io.WriteString(w, `<div class="footer-note">Powered by Pinata • <a href="https://codeberg.org/gigirassy/pinata/">Contribute to this code or host your own instance!</a></div></body></html>`)
 }
 
 // ---------- pin page ----------
@@ -1415,7 +1440,7 @@ func renderPinPage(w http.ResponseWriter, r *http.Request, v pinView) {
 	}
 	b.WriteString(`</div><div class="pin-actions">`)
 	if !disableReverse {
-		b.WriteString(`<a class="magnifier" href="/revsearch?b64=` + base64.StdEncoding.EncodeToString([]byte(v.Orig)) + `" title="Search Tineye" target="_blank">🔍</a>`)
+		b.WriteString(`<a class="magnifier" href="/revsearch?b64=` + base64.StdEncoding.EncodeToString([]byte(v.Orig)) + `" title="Reverse image search" target="_blank">🔍</a>`)
 	}
 	if bookmarkingEnabled {
 		b.WriteString(pinSaveFrame(v.Link, v.Orig))
@@ -1679,6 +1704,32 @@ func thumbImageProxyHandler(w http.ResponseWriter, r *http.Request) {
 	_ = jpeg.Encode(w, resizeNearest(img, targetW), &jpeg.Options{Quality: 82})
 }
 
+// reverseEngines are the reverse image search engines the 🔍 button can use.
+// Each takes the public i.pinimg.com URL of the image appended, escaped, to
+// its prefix; the first one is the default.
+var reverseEngines = []struct{ Key, Name, Prefix string }{
+	{"yandex", "Yandex", "https://yandex.com/images/search?rpt=imageview&url="},
+	{"lens", "Google Lens", "https://lens.google.com/uploadbyurl?url="},
+	{"bing", "Bing", "https://www.bing.com/images/search?view=detailv2&iss=sbi&form=SBIVSP&sbisrc=UrlPaste&q=imgurl:"},
+	{"saucenao", "SauceNAO", "https://saucenao.com/search.php?url="},
+	{"tineye", "TinEye", "https://tineye.com/search?url="},
+}
+
+const reverseCookie = "pinata_revsearch"
+
+// reverseEngine returns the index in reverseEngines of the engine chosen in
+// the settings, or of the default one.
+func reverseEngine(r *http.Request) int {
+	if c, err := r.Cookie(reverseCookie); err == nil {
+		for i, e := range reverseEngines {
+			if e.Key == c.Value {
+				return i
+			}
+		}
+	}
+	return 0
+}
+
 func revsearchHandler(w http.ResponseWriter, r *http.Request) {
 	if disableReverse {
 		http.Error(w, "reverse disabled", http.StatusNotFound)
@@ -1695,12 +1746,12 @@ func revsearchHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	orig := string(bs)
-	if !(strings.HasPrefix(orig, "http://") || strings.HasPrefix(orig, "https://")) {
+	// Only Pinterest images: the instance must not redirect anything else.
+	if !isPinimgURL(orig) {
 		http.Error(w, "invalid url", http.StatusBadRequest)
 		return
 	}
-	tineye := "https://tineye.com/search?url=" + url.QueryEscape(orig)
-	http.Redirect(w, r, tineye, http.StatusSeeOther)
+	http.Redirect(w, r, reverseEngines[reverseEngine(r)].Prefix+url.QueryEscape(orig), http.StatusSeeOther)
 }
 
 // ---------- bookmark handlers ----------
