@@ -547,7 +547,7 @@ func getThemeVars(r *http.Request) (string, string) {
 }
 
 // ---------- CSS (uses CSS vars; defaults are present but overridden per-request via inline style) ----------
-const cssContent = `:root{--bg:#0b0f17;--muted:#94a3b8;--text:#e6e6ff;--accent:#7c3aed;--accent-rgba:rgba(124,58,237,0.12);--img-scale:1}*{box-sizing:border-box}html,body{height:100%}body{margin:0;padding:20px;background:linear-gradient(180deg,#071020 0%,var(--bg) 100%);color:var(--text);font-family:ui-monospace,Menlo,Monaco,monospace}a{color:inherit}.header{display:flex;gap:12px;align-items:center;margin-bottom:18px;flex-wrap:wrap}.brand{font-size:20px;font-weight:700;color:var(--accent);text-decoration:none}.search-box{margin-left:auto;display:flex;gap:8px;align-items:center;flex:0 1 auto}.search-block{width:100%;display:flex;gap:8px;margin-top:14px}.search-inline{display:flex;gap:8px;align-items:center;min-width:0}input[type="text"]{background:transparent;border:1px solid rgba(255,255,255,0.06);padding:8px 12px;color:var(--text);min-width:120px;border-radius:8px;outline:none}button[type="submit"],.btn-save{background:linear-gradient(90deg,var(--accent),#5b21b6);color:white;border:none;padding:8px 12px;border-radius:8px;cursor:pointer}.btn-save{font-weight:600}.img-container{column-width:calc(260px * var(--img-scale));column-gap:16px;width:100%;max-width:1400px;margin-top:18px}.card{display:inline-block;width:100%;margin:0 0 16px;border-radius:10px;overflow:hidden;background:linear-gradient(180deg,rgba(255,255,255,0.01),rgba(255,255,255,0.02));box-shadow:0 6px 18px rgba(3,7,18,0.6);border:1px solid rgba(124,58,237,0.06);break-inside:avoid;-webkit-column-break-inside:avoid;-moz-column-break-inside:avoid;min-height:0;position:relative}.card a{text-decoration:none}.card img{display:block;width:100%;height:auto;object-fit:cover;background:#08101a;font-size:12px;line-height:1.4;overflow:hidden}.card-controls{position:absolute;top:8px;right:8px;display:flex;gap:8px;align-items:center}.btn-save-mini{background:rgba(0,0,0,0.45);border:1px solid rgba(255,255,255,0.06);color:var(--text);padding:6px;border-radius:999px;cursor:pointer;font-weight:700;display:inline-flex;align-items:center;justify-content:center;width:34px;height:34px;text-decoration:none}.magnifier{background:rgba(0,0,0,0.45);border:1px solid rgba(255,255,255,0.06);color:var(--text);padding:6px;border-radius:999px;font-size:14px;width:34px;height:34px;display:inline-flex;align-items:center;justify-content:center;text-decoration:none}.bookmarks{margin-left:12px;color:var(--muted);font-size:14px}.bookmark-list{margin-top:10px;display:flex;gap:8px;flex-wrap:wrap}.bookmark-pill{background:rgba(255,255,255,0.03);padding:6px 8px;border-radius:999px;border:1px solid rgba(255,255,255,0.04);font-size:13px;display:flex;gap:6px;align-items:center}.bookmark-pill form{display:inline}.bookmark-remove-btn{background:transparent;border:none;color:#ff7b7b;font-weight:700;cursor:pointer;padding:0 6px}.bm-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:10px;margin-top:12px;max-width:1100px}.bm-tile{position:relative;aspect-ratio:3/4;border-radius:10px;overflow:hidden;background:#08101a;border:1px solid rgba(255,255,255,0.04)}.bm-tile img{display:block;width:100%;height:100%;object-fit:cover;font-size:12px;color:var(--muted)}.bm-tile form{position:absolute;top:6px;right:6px;margin:0}.bm-tile .bookmark-remove-btn{width:28px;height:28px;padding:0;border-radius:999px;background:rgba(0,0,0,0.55)}.export-form{margin-top:12px;display:flex;gap:8px;align-items:center}.pagination{text-align:center;margin:26px 0}.pagination a{color:var(--accent);text-decoration:none;padding:8px 12px;border-radius:8px;border:1px solid rgba(124,58,237,0.12);background:rgba(124,58,237,0.02)}.footer-note{color:var(--muted);font-size:12px;margin-top:22px}.pin{display:flex;gap:24px;align-items:flex-start;flex-wrap:wrap;margin-top:18px}.pin-media{flex:0 1 auto;max-width:100%}.pin-media img{display:block;max-width:100%;width:auto;height:auto;border-radius:10px;background:#08101a;font-size:14px;overflow:hidden}@media (min-width:641px){.pin-media img{max-height:85vh}}.pin-info{flex:1 1 280px;max-width:560px}.pin-info h2{margin:0 0 10px}.pin-desc{white-space:pre-line;margin:0 0 12px}.pin-meta{color:var(--muted);font-size:14px;line-height:1.7;margin:0 0 12px}.pin-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.save-frame{display:block;width:34px;height:34px;border:0;background:transparent;overflow:hidden}.save-frame-q{width:96px;height:36px;margin-left:8px}@media (max-width:640px){body{padding:12px;font-size:18px}.brand{font-size:22px}input[type="text"]{min-width:120px;padding:12px 14px;font-size:16px}button[type="submit"],.btn-save{padding:10px 14px;font-size:16px;border-radius:10px}.img-container{column-width:calc(180px * var(--img-scale));column-gap:12px}.search-block{gap:10px;flex-direction:column}.search-inline{width:100%}.search-box{margin-left:0;width:100%}.bookmarks{order:3;width:100%;margin-top:8px}}`
+const cssContent = `:root{--bg:#0b0f17;--muted:#94a3b8;--text:#e6e6ff;--accent:#7c3aed;--accent-rgba:rgba(124,58,237,0.12);--img-scale:1}*{box-sizing:border-box}html,body{height:100%}body{margin:0;padding:20px;background:linear-gradient(180deg,#071020 0%,var(--bg) 100%);color:var(--text);font-family:ui-monospace,Menlo,Monaco,monospace}a{color:inherit}.header{display:flex;gap:12px;align-items:center;margin-bottom:18px;flex-wrap:wrap}.brand{font-size:20px;font-weight:700;color:var(--accent);text-decoration:none}.search-box{margin-left:auto;display:flex;gap:8px;align-items:center;flex:0 1 auto}.search-block{width:100%;display:flex;gap:8px;margin-top:14px}.search-inline{display:flex;gap:8px;align-items:center;min-width:0}input[type="text"]{background:transparent;border:1px solid rgba(255,255,255,0.06);padding:8px 12px;color:var(--text);min-width:120px;border-radius:8px;outline:none}button[type="submit"],.btn-save{background:linear-gradient(90deg,var(--accent),#5b21b6);color:white;border:none;padding:8px 12px;border-radius:8px;cursor:pointer}.btn-save{font-weight:600}.img-container{column-width:calc(260px * var(--img-scale));column-gap:16px;width:100%;max-width:1400px;margin-top:18px}.card{display:inline-block;width:100%;margin:0 0 16px;border-radius:10px;overflow:hidden;background:linear-gradient(180deg,rgba(255,255,255,0.01),rgba(255,255,255,0.02));box-shadow:0 6px 18px rgba(3,7,18,0.6);border:1px solid rgba(124,58,237,0.06);break-inside:avoid;-webkit-column-break-inside:avoid;min-height:0;position:relative}.card a{text-decoration:none}.card img{display:block;width:100%;height:auto;object-fit:cover;background:#08101a;font-size:12px;line-height:1.4;overflow:hidden}.card-controls{position:absolute;top:8px;right:8px;display:flex;gap:8px;align-items:center}.btn-save-mini{background:rgba(0,0,0,0.45);border:1px solid rgba(255,255,255,0.06);color:var(--text);padding:6px;border-radius:999px;cursor:pointer;font-weight:700;display:inline-flex;align-items:center;justify-content:center;width:34px;height:34px;text-decoration:none}.magnifier{background:rgba(0,0,0,0.45);border:1px solid rgba(255,255,255,0.06);color:var(--text);padding:6px;border-radius:999px;font-size:14px;width:34px;height:34px;display:inline-flex;align-items:center;justify-content:center;text-decoration:none}.bookmarks{margin-left:12px;color:var(--muted);font-size:14px}.bookmark-list{margin-top:10px;display:flex;gap:8px;flex-wrap:wrap}.bookmark-pill{background:rgba(255,255,255,0.03);padding:6px 8px;border-radius:999px;border:1px solid rgba(255,255,255,0.04);font-size:13px;display:flex;gap:6px;align-items:center}.bookmark-pill form{display:inline}.bookmark-remove-btn{background:transparent;border:none;color:#ff7b7b;font-weight:700;cursor:pointer;padding:0 6px}.bm-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:10px;margin-top:12px;max-width:1100px}.bm-tile{position:relative;aspect-ratio:3/4;border-radius:10px;overflow:hidden;background:#08101a;border:1px solid rgba(255,255,255,0.04)}.bm-tile img{display:block;width:100%;height:100%;object-fit:cover;font-size:12px;color:var(--muted)}.bm-tile form{position:absolute;top:6px;right:6px;margin:0}.bm-tile .bookmark-remove-btn{width:28px;height:28px;padding:0;border-radius:999px;background:rgba(0,0,0,0.55)}.export-form{margin-top:12px;display:flex;gap:8px;align-items:center}.pagination{text-align:center;margin:26px 0}.pagination a{color:var(--accent);text-decoration:none;padding:8px 12px;border-radius:8px;border:1px solid rgba(124,58,237,0.12);background:rgba(124,58,237,0.02)}.footer-note{color:var(--muted);font-size:12px;margin-top:22px}.pin{display:flex;gap:24px;align-items:flex-start;flex-wrap:wrap;margin-top:18px}.pin-media{flex:0 1 auto;max-width:100%}.pin-media img{display:block;max-width:100%;width:auto;height:auto;border-radius:10px;background:#08101a;font-size:14px;overflow:hidden}@media (min-width:641px){.pin-media img{max-height:85vh}}.pin-info{flex:1 1 280px;max-width:560px}.pin-info h2{margin:0 0 10px}.pin-desc{white-space:pre-line;margin:0 0 12px}.pin-meta{color:var(--muted);font-size:14px;line-height:1.7;margin:0 0 12px}.pin-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.save-frame{display:block;width:34px;height:34px;border:0;background:transparent;overflow:hidden}.save-frame-q{width:96px;height:36px;margin-left:8px}@media (max-width:640px){body{padding:12px;font-size:18px}.brand{font-size:22px}input[type="text"]{min-width:120px;padding:12px 14px;font-size:16px}button[type="submit"],.btn-save{padding:10px 14px;font-size:16px;border-radius:10px}.img-container{column-width:calc(180px * var(--img-scale));column-gap:12px}.search-block{gap:10px;flex-direction:column}.search-inline{width:100%}.search-box{margin-left:0;width:100%}.bookmarks{order:3;width:100%;margin-top:8px}}`
 
 // ---------- handlers ----------
 
@@ -619,7 +619,7 @@ func settingsPostHandler(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, next, http.StatusSeeOther)
 }
 
-func renderCardHTML(r *searchResult, href string, thumbMobile, thumbDesktop, thumbHigh int) string {
+func renderCardHTML(st *saveState, r *searchResult, href string, thumbMobile, thumbDesktop, thumbHigh int) string {
 	full := fullImage(r.Images.Orig, r.Images.X736)
 	u := full.URL
 	if href == "" {
@@ -679,7 +679,7 @@ func renderCardHTML(r *searchResult, href string, thumbMobile, thumbDesktop, thu
 		b.WriteString(`" title="Reverse image search" target="_blank">🔍</a>`)
 	}
 	if bookmarkingEnabled {
-		b.WriteString(pinSaveFrame(href, u))
+		b.WriteString(pinSaveFrame(st, href, u))
 	}
 	b.WriteString(`</div></div>`)
 	return b.String()
@@ -941,8 +941,9 @@ func searchHandler(w http.ResponseWriter, r *http.Request) {
 	// header: inline search and Save-search form
 	_, _ = io.WriteString(w, `<div class="header" style="margin-bottom:8px;"><a class="brand" href="/">Pinata</a><div class="search-box">`)
 	_, _ = io.WriteString(w, `<form class="search-inline" method="get" action="/search"><input type="text" name="q" value="`+html.EscapeString(q)+`" maxlength="64"><button type="submit">Search</button></form>`)
+	st := newSaveState(r)
 	if bookmarkingEnabled {
-		_, _ = io.WriteString(w, saveFrameTag("q", q, ""))
+		_, _ = io.WriteString(w, saveFrameTag(st, "q", q, ""))
 	}
 	_, _ = io.WriteString(w, `</div></div>`)
 	_, _ = io.WriteString(w, `<h2 style="margin:4px 0 0 0;">Results for "`+html.EscapeString(q)+`"</h2>`)
@@ -989,7 +990,7 @@ func searchHandler(w http.ResponseWriter, r *http.Request) {
 					continue
 				}
 				shown++
-				_, _ = io.WriteString(w, renderCardHTML(&rObj, cardHref(&rObj), thumbMobile, thumbDesktop, thumbHigh))
+				_, _ = io.WriteString(w, renderCardHTML(st, &rObj, cardHref(&rObj), thumbMobile, thumbDesktop, thumbHigh))
 				if f, ok := w.(http.Flusher); ok {
 					f.Flush()
 				}
@@ -1443,7 +1444,7 @@ func renderPinPage(w http.ResponseWriter, r *http.Request, v pinView) {
 		b.WriteString(`<a class="magnifier" href="/revsearch?b64=` + base64.StdEncoding.EncodeToString([]byte(v.Orig)) + `" title="Reverse image search" target="_blank">🔍</a>`)
 	}
 	if bookmarkingEnabled {
-		b.WriteString(pinSaveFrame(v.Link, v.Orig))
+		b.WriteString(pinSaveFrame(newSaveState(r), v.Link, v.Orig))
 	}
 	b.WriteString(`<a class="btn-save" href="` + html.EscapeString(full) + `" target="_blank" rel="noreferrer" style="text-decoration:none;">Full size</a>`)
 	b.WriteString(`</div></div></div></body></html>`)
@@ -1788,32 +1789,44 @@ func saveTarget(typ, v, img string) (string, string, bool) {
 	return "", "", false
 }
 
-func saveFrameURL(typ, v, img string) string {
-	u := "/frame/save?type=" + url.QueryEscape(typ) + "&v=" + url.QueryEscape(v)
-	if img != "" {
-		u += "&img=" + url.QueryEscape(img)
-	}
-	return u
+// saveState is what a page needs to draw its save buttons: the accent color
+// and what is already bookmarked, read once per page.
+type saveState struct {
+	accent string
+	saved  map[string]bool
 }
 
-// saveFrameTag returns the iframe that embeds a save button.
-func saveFrameTag(typ, v, img string) string {
+func newSaveState(r *http.Request) *saveState {
+	st := &saveState{saved: map[string]bool{}}
+	st.accent, _ = getThemeVars(r)
+	for _, e := range readBookmarksFromReq(r) {
+		st.saved[e.Type+"|"+e.Value] = true
+	}
+	return st
+}
+
+// saveFrameTag returns the iframe that embeds a save button. The button's
+// document is inline (srcdoc), so it shows up with the page instead of
+// costing one more request per card; pressing it posts to /frame/save,
+// which answers with the button in its new state inside the same frame.
+func saveFrameTag(st *saveState, typ, v, img string) string {
 	class, title := "save-frame", "Save pin"
 	if typ == "q" {
 		class, title = "save-frame save-frame-q", "Save search"
 	} else if typ == "img" {
 		title = "Save image"
 	}
-	return `<iframe class="` + class + `" src="` + html.EscapeString(saveFrameURL(typ, v, img)) + `" title="` + title + `" loading="lazy" scrolling="no"></iframe>`
+	doc := saveFrameDoc(st.accent, typ, v, img, st.saved[typ+"|"+v])
+	return `<iframe class="` + class + `" srcdoc="` + html.EscapeString(doc) + `" title="` + title + `" scrolling="no"></iframe>`
 }
 
 // pinSaveFrame returns the save button for a pin: it saves the pin page link,
 // or just the image when the link is too long to store.
-func pinSaveFrame(link, img string) string {
+func pinSaveFrame(st *saveState, link, img string) string {
 	if strings.HasPrefix(link, "/pin/") && len(link) <= maxPinLink {
-		return saveFrameTag("pin", link, img)
+		return saveFrameTag(st, "pin", link, img)
 	}
-	return saveFrameTag("img", img, "")
+	return saveFrameTag(st, "img", img, "")
 }
 
 func saveFrameHandler(w http.ResponseWriter, r *http.Request) {
@@ -1840,6 +1853,13 @@ func saveFrameHandler(w http.ResponseWriter, r *http.Request) {
 // renderSaveFrame writes the save button document shown inside the frame.
 func renderSaveFrame(w http.ResponseWriter, r *http.Request, typ, v, img string, saved bool) {
 	accent, _ := getThemeVars(r)
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
+	_, _ = io.WriteString(w, saveFrameDoc(accent, typ, v, img, saved))
+}
+
+// saveFrameDoc returns the document inside a save button frame.
+func saveFrameDoc(accent, typ, v, img string, saved bool) string {
 	action, label, title, class := "add", "❤", "Save", "heart"
 	if typ == "q" {
 		label, title, class = "Save", "Save search", "text"
@@ -1856,11 +1876,9 @@ func renderSaveFrame(w http.ResponseWriter, r *http.Request, typ, v, img string,
 		`.text{height:36px;width:96px;border:none;border-radius:8px;color:#fff;background:linear-gradient(90deg,` + html.EscapeString(accent) + `,#5b21b6)}` +
 		`.text.saved{background:rgba(255,255,255,0.08);border:1px solid ` + html.EscapeString(accent) + `}`
 
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.Header().Set("Cache-Control", "no-store")
-	_, _ = io.WriteString(w, `<!doctype html><html lang="en"><head><meta charset="utf-8"><style>`+css+`</style></head><body>`+
-		`<form method="post" action="/frame/save"><input type="hidden" name="type" value="`+html.EscapeString(typ)+`"><input type="hidden" name="v" value="`+html.EscapeString(v)+`"><input type="hidden" name="img" value="`+html.EscapeString(img)+`"><input type="hidden" name="action" value="`+action+`">`+
-		`<button type="submit" class="`+class+`" title="`+title+`">`+label+`</button></form></body></html>`)
+	return `<!doctype html><html lang="en"><head><meta charset="utf-8"><style>` + css + `</style></head><body>` +
+		`<form method="post" action="/frame/save"><input type="hidden" name="type" value="` + html.EscapeString(typ) + `"><input type="hidden" name="v" value="` + html.EscapeString(v) + `"><input type="hidden" name="img" value="` + html.EscapeString(img) + `"><input type="hidden" name="action" value="` + action + `">` +
+		`<button type="submit" class="` + class + `" title="` + title + `">` + label + `</button></form></body></html>`
 }
 
 func saveFramePostHandler(w http.ResponseWriter, r *http.Request) {
