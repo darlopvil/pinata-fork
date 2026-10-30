@@ -2,18 +2,48 @@
 
 A light, JavaScript-free frontend for Pinterest: search, open pins, save bookmarks, all without loading anything from Pinterest in your browser.
 
-This is darlopvil's fork of [Pinata by gigirassy](https://codeberg.org/gigirassy/pinata). It is developed on its own, without pull requests to the original; issues are welcome here.
+This is darlopvil's fork of [Pinata by gigirassy](https://codeberg.org/gigirassy/pinata), with its own features and fixes, listed below. Issues and suggestions are welcome in this repository.
 
-## Features
+## What it does
 
 - **No JavaScript, no database.** A single Go binary in a Docker image of a few megabytes; settings and bookmarks live in the browser, in an encrypted cookie.
-- **Pinterest never sees the browser.** The server fetches searches, pins and images; pages load nothing from other sites (strict Content-Security-Policy, no referrer).
-- **Pin pages** with title, description, source link, pinner, board and date, for pins opened from search results or from Pinterest pin URLs.
-- **Bookmarks** for searches and pins, shown as thumbnails on the homepage, saved and removed without reloading the page. Export and import as JSON.
-- **Reverse image search** with Yandex (default), Google Lens, Bing, SauceNAO or TinEye.
-- **Settings** behind the gear icon: accent color, image size, animated or still GIFs, reverse search engine.
-- Downloaded images are named after the pin.
-- Optional [image proxy backend](https://codeberg.org/gigirassy/image-proxy) to recompress images.
+- **Pinterest never sees the browser.** The server fetches searches, pins and images; pages load nothing from other sites.
+- Search, pin pages, bookmarks, reverse image search and an optional [image proxy backend](https://codeberg.org/gigirassy/image-proxy) to recompress images.
+
+## Compared to the original
+
+### New features
+
+- **Pin pages** at `/pin/{id}`, also in Pinterest's `<slug>--<id>` form, with title, description, source link, pinner, board, date and saves. Search results link to them too: logged-out searches return pin IDs Pinterest won't resolve, so their cards carry the pin's data in a signed link.
+- **Save buttons that don't reload the page**, on cards, pin pages and searches. The heart saves the pin, and the homepage shows saved pins as thumbnails that open their pin page.
+- **Settings page** behind a gear icon on every page: accent color, image size, reverse search engine, Animate GIFs, and bookmark export and import. Saving goes back to the page you came from.
+- **Reverse image search** with Yandex (default), Google Lens, Bing, SauceNAO or TinEye, instead of TinEye only.
+- **Animated GIFs** in search results, or still images if you prefer (Animate GIFs: never).
+- **Downloaded images are named after the pin**, instead of `image_proxy`.
+- **Lighter thumbnails**, resized from Pinterest's own JPEG variants instead of the full originals: on 10 test results, 148 KB instead of 20.1 MB with GIFs shown still.
+- **Image placeholders**: real alt text and each pin's dominant color while images load.
+- **Error pages** that say what happened: Pinterest rate-limiting the instance, Pinterest errors, no results, unknown pages.
+- A favicon.
+
+### Bug fixes
+
+Security:
+
+- Any website could wipe your bookmarks or reset your settings with a hidden form or a plain link. Cross-site requests are now blocked, and only POST changes anything.
+- The instance could be used to redirect visitors to any other site, through a form parameter (open redirect).
+- No Content-Security-Policy or other security headers; cookies were set without `Secure`, and settings cookies without `HttpOnly`.
+
+Behavior:
+
+- A Pinterest error, rate limiting included, showed as an empty results page, so a blocked instance looked like a search with no results.
+- A result without an image showed the previous result's image.
+- Pages appeared unstyled for a second or two after "Next page" in Firefox.
+- Searches longer than 21 characters in Chinese, Japanese or Korean bounced back to the homepage: the length limit counted bytes, not characters.
+- The 30th bookmark was silently lost: the cookie outgrew what browsers accept.
+- HEIC images failed to show in search results.
+- Unknown pages answered with the homepage instead of a 404.
+- The homepage claimed no data reaches Pinterest and that the instance owner can never see what you view. It now explains what actually happens (see Privacy).
+- Firefox warned about an unsupported CSS property on every page.
 
 ## How to run
 
