@@ -522,6 +522,15 @@ func hexToRGBA(hex string, alpha float64) string {
 }
 
 // get theme variables from cookies; returns accent (hex) and imgScale (float like "1.00")
+const gifsCookie = "pinata_gifs"
+
+// animateGIFs reports whether GIFs play ("always", the default) or show as a
+// still image ("never", which also saves their megabytes).
+func animateGIFs(r *http.Request) bool {
+	c, err := r.Cookie(gifsCookie)
+	return err != nil || c.Value != "never"
+}
+
 func getThemeVars(r *http.Request) (string, string) {
 	// Default accent
 	accent := "#7c3aed"
@@ -548,8 +557,11 @@ func getThemeVars(r *http.Request) (string, string) {
 	return accent, imgScale
 }
 
+// gearLink opens the settings page; every page header has it.
+const gearLink = `<a class="gear" href="/settings" title="Settings" aria-label="Settings">⚙</a>`
+
 // ---------- CSS (uses CSS vars; defaults are present but overridden per-request via inline style) ----------
-const cssContent = `:root{--bg:#0b0f17;--muted:#94a3b8;--text:#e6e6ff;--accent:#7c3aed;--accent-rgba:rgba(124,58,237,0.12);--img-scale:1}*{box-sizing:border-box}html,body{height:100%}body{margin:0;padding:20px;background:linear-gradient(180deg,#071020 0%,var(--bg) 100%);color:var(--text);font-family:ui-monospace,Menlo,Monaco,monospace}a{color:inherit}.header{display:flex;gap:12px;align-items:center;margin-bottom:18px;flex-wrap:wrap}.brand{font-size:20px;font-weight:700;color:var(--accent);text-decoration:none}.search-box{margin-left:auto;display:flex;gap:8px;align-items:center;flex:0 1 auto}.search-block{width:100%;display:flex;gap:8px;margin-top:14px}.search-inline{display:flex;gap:8px;align-items:center;min-width:0}input[type="text"]{background:transparent;border:1px solid rgba(255,255,255,0.06);padding:8px 12px;color:var(--text);min-width:120px;border-radius:8px;outline:none}button[type="submit"],.btn-save{background:linear-gradient(90deg,var(--accent),#5b21b6);color:white;border:none;padding:8px 12px;border-radius:8px;cursor:pointer}.btn-save{font-weight:600}.img-container{column-width:calc(260px * var(--img-scale));column-gap:16px;width:100%;max-width:1400px;margin-top:18px}.card{display:inline-block;width:100%;margin:0 0 16px;border-radius:10px;overflow:hidden;background:linear-gradient(180deg,rgba(255,255,255,0.01),rgba(255,255,255,0.02));box-shadow:0 6px 18px rgba(3,7,18,0.6);border:1px solid rgba(124,58,237,0.06);break-inside:avoid;-webkit-column-break-inside:avoid;min-height:0;position:relative}.card a{text-decoration:none}.card img{display:block;width:100%;height:auto;object-fit:cover;background:#08101a;font-size:12px;line-height:1.4;overflow:hidden}.card-controls{position:absolute;top:8px;right:8px;display:flex;gap:8px;align-items:center}.btn-save-mini{background:rgba(0,0,0,0.45);border:1px solid rgba(255,255,255,0.06);color:var(--text);padding:6px;border-radius:999px;cursor:pointer;font-weight:700;display:inline-flex;align-items:center;justify-content:center;width:34px;height:34px;text-decoration:none}.magnifier{background:rgba(0,0,0,0.45);border:1px solid rgba(255,255,255,0.06);color:var(--text);padding:6px;border-radius:999px;font-size:14px;width:34px;height:34px;display:inline-flex;align-items:center;justify-content:center;text-decoration:none}.bookmarks{margin-left:12px;color:var(--muted);font-size:14px}.bookmark-list{margin-top:10px;display:flex;gap:8px;flex-wrap:wrap}.bookmark-pill{background:rgba(255,255,255,0.03);padding:6px 8px;border-radius:999px;border:1px solid rgba(255,255,255,0.04);font-size:13px;display:flex;gap:6px;align-items:center}.bookmark-pill form{display:inline}.bookmark-remove-btn{background:transparent;border:none;color:#ff7b7b;font-weight:700;cursor:pointer;padding:0 6px}.bm-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:10px;margin-top:12px;max-width:1100px}.bm-tile{position:relative;aspect-ratio:3/4;border-radius:10px;overflow:hidden;background:#08101a;border:1px solid rgba(255,255,255,0.04)}.bm-tile img{display:block;width:100%;height:100%;object-fit:cover;font-size:12px;color:var(--muted)}.bm-tile form{position:absolute;top:6px;right:6px;margin:0}.bm-tile .bookmark-remove-btn{width:28px;height:28px;padding:0;border-radius:999px;background:rgba(0,0,0,0.55)}.export-form{margin-top:12px;display:flex;gap:8px;align-items:center}.pagination{text-align:center;margin:26px 0}.pagination a{color:var(--accent);text-decoration:none;padding:8px 12px;border-radius:8px;border:1px solid rgba(124,58,237,0.12);background:rgba(124,58,237,0.02)}.footer-note{color:var(--muted);font-size:12px;margin-top:22px}.pin{display:flex;gap:24px;align-items:flex-start;flex-wrap:wrap;margin-top:18px}.pin-media{flex:0 1 auto;max-width:100%}.pin-media img{display:block;max-width:100%;width:auto;height:auto;border-radius:10px;background:#08101a;font-size:14px;overflow:hidden}@media (min-width:641px){.pin-media img{max-height:85vh}}.pin-info{flex:1 1 280px;max-width:560px}.pin-info h2{margin:0 0 10px}.pin-desc{white-space:pre-line;margin:0 0 12px}.pin-meta{color:var(--muted);font-size:14px;line-height:1.7;margin:0 0 12px}.pin-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.save-frame{display:block;width:34px;height:34px;border:0;background:transparent;overflow:hidden}.save-frame-q{width:96px;height:36px;margin-left:8px}@media (max-width:640px){body{padding:12px;font-size:18px}.brand{font-size:22px}input[type="text"]{min-width:120px;padding:12px 14px;font-size:16px}button[type="submit"],.btn-save{padding:10px 14px;font-size:16px;border-radius:10px}.img-container{column-width:calc(180px * var(--img-scale));column-gap:12px}.search-block{gap:10px;flex-direction:column}.search-inline{width:100%}.search-box{margin-left:0;width:100%}.bookmarks{order:3;width:100%;margin-top:8px}}`
+const cssContent = `:root{--bg:#0b0f17;--muted:#94a3b8;--text:#e6e6ff;--accent:#7c3aed;--accent-rgba:rgba(124,58,237,0.12);--img-scale:1}*{box-sizing:border-box}html,body{height:100%}body{margin:0;padding:20px;background:linear-gradient(180deg,#071020 0%,var(--bg) 100%);color:var(--text);font-family:ui-monospace,Menlo,Monaco,monospace}a{color:inherit}.header{display:flex;gap:12px;align-items:center;margin-bottom:18px;flex-wrap:wrap}.brand{font-size:20px;font-weight:700;color:var(--accent);text-decoration:none}.search-box{margin-left:auto;display:flex;gap:8px;align-items:center;justify-content:flex-end;flex:0 1 auto}.gear{display:inline-flex;align-items:center;justify-content:center;flex:none;width:36px;height:36px;border-radius:8px;border:1px solid rgba(255,255,255,0.06);color:var(--muted);font-size:18px;text-decoration:none}.header>.gear{margin-left:auto}.gear:hover,.gear[aria-current]{color:var(--text);border-color:var(--accent)}.settings{max-width:560px;display:flex;flex-direction:column;gap:14px;margin-top:14px}.settings label{display:flex;justify-content:space-between;align-items:center;gap:12px;font-size:14px;color:var(--muted)}.settings h3{margin:18px 0 0;font-size:15px}.settings .note{font-size:13px;color:var(--muted);margin:0}.settings .export-form{flex-wrap:wrap}.search-block{width:100%;display:flex;gap:8px;margin-top:14px}.search-inline{display:flex;gap:8px;align-items:center;min-width:0}input[type="text"]{background:transparent;border:1px solid rgba(255,255,255,0.06);padding:8px 12px;color:var(--text);min-width:120px;border-radius:8px;outline:none}button[type="submit"],.btn-save{background:linear-gradient(90deg,var(--accent),#5b21b6);color:white;border:none;padding:8px 12px;border-radius:8px;cursor:pointer}.btn-save{font-weight:600}.img-container{column-width:calc(260px * var(--img-scale));column-gap:16px;width:100%;max-width:1400px;margin-top:18px}.card{display:inline-block;width:100%;margin:0 0 16px;border-radius:10px;overflow:hidden;background:linear-gradient(180deg,rgba(255,255,255,0.01),rgba(255,255,255,0.02));box-shadow:0 6px 18px rgba(3,7,18,0.6);border:1px solid rgba(124,58,237,0.06);break-inside:avoid;-webkit-column-break-inside:avoid;min-height:0;position:relative}.card a{text-decoration:none}.card img{display:block;width:100%;height:auto;object-fit:cover;background:#08101a;font-size:12px;line-height:1.4;overflow:hidden}.card-controls{position:absolute;top:8px;right:8px;display:flex;gap:8px;align-items:center}.btn-save-mini{background:rgba(0,0,0,0.45);border:1px solid rgba(255,255,255,0.06);color:var(--text);padding:6px;border-radius:999px;cursor:pointer;font-weight:700;display:inline-flex;align-items:center;justify-content:center;width:34px;height:34px;text-decoration:none}.magnifier{background:rgba(0,0,0,0.45);border:1px solid rgba(255,255,255,0.06);color:var(--text);padding:6px;border-radius:999px;font-size:14px;width:34px;height:34px;display:inline-flex;align-items:center;justify-content:center;text-decoration:none}.bookmarks{margin-left:12px;color:var(--muted);font-size:14px}.bookmark-list{margin-top:10px;display:flex;gap:8px;flex-wrap:wrap}.bookmark-pill{background:rgba(255,255,255,0.03);padding:6px 8px;border-radius:999px;border:1px solid rgba(255,255,255,0.04);font-size:13px;display:flex;gap:6px;align-items:center}.bookmark-pill form{display:inline}.bookmark-remove-btn{background:transparent;border:none;color:#ff7b7b;font-weight:700;cursor:pointer;padding:0 6px}.bm-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:10px;margin-top:12px;max-width:1100px}.bm-tile{position:relative;aspect-ratio:3/4;border-radius:10px;overflow:hidden;background:#08101a;border:1px solid rgba(255,255,255,0.04)}.bm-tile img{display:block;width:100%;height:100%;object-fit:cover;font-size:12px;color:var(--muted)}.bm-tile form{position:absolute;top:6px;right:6px;margin:0}.bm-tile .bookmark-remove-btn{width:28px;height:28px;padding:0;border-radius:999px;background:rgba(0,0,0,0.55)}.export-form{margin-top:12px;display:flex;gap:8px;align-items:center}.pagination{text-align:center;margin:26px 0}.pagination a{color:var(--accent);text-decoration:none;padding:8px 12px;border-radius:8px;border:1px solid rgba(124,58,237,0.12);background:rgba(124,58,237,0.02)}.footer-note{color:var(--muted);font-size:12px;margin-top:22px}.pin{display:flex;gap:24px;align-items:flex-start;flex-wrap:wrap;margin-top:18px}.pin-media{flex:0 1 auto;max-width:100%}.pin-media img{display:block;max-width:100%;width:auto;height:auto;border-radius:10px;background:#08101a;font-size:14px;overflow:hidden}@media (min-width:641px){.pin-media img{max-height:85vh}}.pin-info{flex:1 1 280px;max-width:560px}.pin-info h2{margin:0 0 10px}.pin-desc{white-space:pre-line;margin:0 0 12px}.pin-meta{color:var(--muted);font-size:14px;line-height:1.7;margin:0 0 12px}.pin-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.save-frame{display:block;width:34px;height:34px;border:0;background:transparent;overflow:hidden}.save-frame-q{width:96px;height:36px;margin-left:8px}@media (max-width:640px){body{padding:12px;font-size:18px}.brand{font-size:22px}input[type="text"]{min-width:120px;padding:12px 14px;font-size:16px}button[type="submit"],.btn-save{padding:10px 14px;font-size:16px;border-radius:10px}.img-container{column-width:calc(180px * var(--img-scale));column-gap:12px}.search-block{gap:10px;flex-direction:column}.search-inline{width:100%}.search-box{margin-left:0;width:100%}.bookmarks{order:3;width:100%;margin-top:8px}}`
 
 // ---------- handlers ----------
 
@@ -563,6 +575,57 @@ func pageHead(r *http.Request, title string) string {
 }
 
 // settings POST handler: sets accent color and image scale cookies
+func settingsPageHandler(w http.ResponseWriter, r *http.Request) {
+	accent, imgScale := getThemeVars(r)
+	var b strings.Builder
+	b.WriteString(pageHead(r, "Settings - Pinata"))
+	b.WriteString(`<div class="header"><a class="brand" href="/">Pinata</a>` + strings.Replace(gearLink, `<a `, `<a aria-current="page" `, 1) + `</div>`)
+	b.WriteString(`<h2 style="margin:4px 0 0">Settings</h2>`)
+	if r.URL.Query().Get("saved") == "1" {
+		b.WriteString(`<p class="note" style="margin-top:8px;color:var(--muted)">Settings saved.</p>`)
+	}
+	b.WriteString(`<form class="settings" method="post" action="/settings">`)
+	b.WriteString(`<label>Accent color <input type="color" name="accent" value="` + html.EscapeString(accent) + `"></label>`)
+	b.WriteString(`<label>Image size <select name="scale">`)
+	for _, v := range []int{75, 100, 125, 150} {
+		sel := ""
+		if fmt.Sprintf("%.2f", float64(v)/100.0) == imgScale {
+			sel = ` selected`
+		}
+		b.WriteString(`<option value="` + strconv.Itoa(v) + `"` + sel + `>` + strconv.Itoa(v) + `%</option>`)
+	}
+	b.WriteString(`</select></label>`)
+	never := ""
+	if !animateGIFs(r) {
+		never = ` selected`
+	}
+	b.WriteString(`<label>Animate GIFs <select name="gifs"><option value="always">Always</option><option value="never"` + never + `>Never</option></select></label>`)
+	b.WriteString(`<p class="note">"Never" shows GIFs as still images, which also saves their megabytes. Opening the image still plays it.</p>`)
+	if !disableReverse {
+		b.WriteString(`<label>Reverse image search <select name="revsearch">`)
+		cur := reverseEngine(r)
+		for i, e := range reverseEngines {
+			sel := ""
+			if i == cur {
+				sel = ` selected`
+			}
+			b.WriteString(`<option value="` + e.Key + `"` + sel + `>` + e.Name + `</option>`)
+		}
+		b.WriteString(`</select></label>`)
+	}
+	b.WriteString(`<input type="hidden" name="next" value="/settings?saved=1"><div><button type="submit" class="btn-save">Save settings</button></div></form>`)
+	if bookmarkingEnabled {
+		b.WriteString(`<div class="settings"><h3>Bookmarks</h3>`)
+		b.WriteString(`<p class="note">Bookmarks live in an encrypted cookie in this browser only. Export them to keep a copy or move them to another browser; importing adds them to the ones you have.</p>`)
+		b.WriteString(`<div class="export-form" style="margin-top:0"><form method="get" action="/bookmarks/export"><button type="submit" class="btn-save">Export JSON</button></form></div>`)
+		b.WriteString(`<form class="export-form" style="margin-top:0" method="post" action="/bookmarks/import" enctype="multipart/form-data"><input type="file" name="file" accept="application/json" required><button type="submit" class="btn-save">Import JSON</button></form></div>`)
+	}
+	b.WriteString(`<div class="footer-note">Powered by Pinata • <a href="https://codeberg.org/gigirassy/pinata/">Contribute to this code or host your own instance!</a></div></body></html>`)
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
+	_, _ = io.WriteString(w, b.String())
+}
+
 func settingsPostHandler(w http.ResponseWriter, r *http.Request) {
 	if err := r.ParseForm(); err != nil {
 		http.Redirect(w, r, "/", http.StatusSeeOther)
@@ -604,6 +667,17 @@ func settingsPostHandler(w http.ResponseWriter, r *http.Request) {
 		Secure:   isHTTPS(r),
 		MaxAge:   60 * 60 * 24 * 365 * 5,
 	})
+	if g := r.FormValue("gifs"); g == "always" || g == "never" {
+		http.SetCookie(w, &http.Cookie{
+			Name:     gifsCookie,
+			Value:    g,
+			Path:     "/",
+			HttpOnly: true,
+			SameSite: http.SameSiteLaxMode,
+			Secure:   isHTTPS(r),
+			MaxAge:   60 * 60 * 24 * 365 * 5,
+		})
+	}
 	for _, e := range reverseEngines {
 		if e.Key == r.FormValue("revsearch") {
 			http.SetCookie(w, &http.Cookie{
@@ -621,7 +695,7 @@ func settingsPostHandler(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, next, http.StatusSeeOther)
 }
 
-func renderCardHTML(st *saveState, r *searchResult, href string, thumbMobile, thumbDesktop, thumbHigh int) string {
+func renderCardHTML(st *pageState, r *searchResult, href string, thumbMobile, thumbDesktop, thumbHigh int) string {
 	full := fullImage(r.Images.Orig, r.Images.X736)
 	u := full.URL
 	name := firstNonEmpty(r.Title, r.GridTitle, r.Description)
@@ -658,7 +732,7 @@ func renderCardHTML(st *saveState, r *searchResult, href string, thumbMobile, th
 	b.WriteString(`<a href="`)
 	b.WriteString(html.EscapeString(href))
 	b.WriteString(`" style="display:block;" target="_blank" rel="noreferrer"><img loading="lazy" decoding="async" src="`)
-	if strings.HasSuffix(strings.ToLower(u), ".gif") {
+	if st.animate && strings.HasSuffix(strings.ToLower(u), ".gif") {
 		// GIF cards show the animated original instead of a resized JPEG.
 		b.WriteString(html.EscapeString(imageProxyURL(u, name)))
 	} else {
@@ -702,7 +776,7 @@ func renderErrorPage(w http.ResponseWriter, r *http.Request, code int, msg strin
 	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(code)
 	_, _ = io.WriteString(w, pageHead(r, title+" - Pinata"))
-	_, _ = io.WriteString(w, `<div class="header"><a class="brand" href="/">Pinata</a></div>`)
+	_, _ = io.WriteString(w, `<div class="header"><a class="brand" href="/">Pinata</a>`+gearLink+`</div>`)
 	_, _ = io.WriteString(w, `<h2 style="margin:4px 0 8px 0;">`+html.EscapeString(title)+`</h2><p style="color:var(--muted);">`+html.EscapeString(msg)+`</p><p><a href="/">Back to search</a></p></body></html>`)
 }
 
@@ -788,41 +862,11 @@ func withErrorPages(mux *http.ServeMux) http.Handler {
 
 // Index (front) - server-rendered bookmarks and settings form (no JS)
 func indexHandler(w http.ResponseWriter, r *http.Request) {
-	accent, imgScale := getThemeVars(r)
-
-	w.Header().Set("Content-Type", "text/html; charset=utf8")
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	_, _ = io.WriteString(w, pageHead(r, "Pinata - Search"))
-	_, _ = io.WriteString(w, `<div class="header"><a class="brand" href="/">Pinata</a><div class="search-box"></div></div>`)
+	_, _ = io.WriteString(w, `<div class="header"><a class="brand" href="/">Pinata</a>`+gearLink+`</div>`)
 	_, _ = io.WriteString(w, `<div style="color:var(--muted); margin-bottom:12px;">Pinata is an alternate frontend to Pinterest with support for reverse image search, encrypted bookmarks, and image proxying! None of your data ever reaches Pinterest or their servers while using this frontend, and the instance owner can not ever see what you view or bookmarks.</div>`)
 	_, _ = io.WriteString(w, `<form class="search-block" method="get" action="/search"><input type="text" name="q" placeholder="Search Image" required maxlength="64"><button type="submit">Search</button></form>`)
-
-	// Settings form (color + scale)
-	_, _ = io.WriteString(w, `<div style="margin-top:12px;"><form method="post" action="/settings" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">`)
-	_, _ = io.WriteString(w, `<label style="font-size:14px;color:var(--muted);">Accent: <input type="color" name="accent" value="`+html.EscapeString(accent)+`" style="margin-left:6px;"></label>`)
-	_, _ = io.WriteString(w, `<label style="font-size:14px;color:var(--muted);">Image scale: <select name="scale" style="margin-left:6px;">`)
-	// options: 75,100,125,150
-	opts := []int{75, 100, 125, 150}
-	for _, v := range opts {
-		sel := ""
-		if fmt.Sprintf("%.2f", float64(v)/100.0) == imgScale {
-			sel = ` selected`
-		}
-		_, _ = io.WriteString(w, `<option value="`+strconv.Itoa(v)+`"`+sel+`>`+strconv.Itoa(v)+`%</option>`)
-	}
-	_, _ = io.WriteString(w, `</select></label>`)
-	if !disableReverse {
-		_, _ = io.WriteString(w, `<label style="font-size:14px;color:var(--muted);">Reverse image search: <select name="revsearch" style="margin-left:6px;">`)
-		cur := reverseEngine(r)
-		for i, e := range reverseEngines {
-			sel := ""
-			if i == cur {
-				sel = ` selected`
-			}
-			_, _ = io.WriteString(w, `<option value="`+e.Key+`"`+sel+`>`+e.Name+`</option>`)
-		}
-		_, _ = io.WriteString(w, `</select></label>`)
-	}
-	_, _ = io.WriteString(w, `<input type="hidden" name="next" value="/"><button type="submit" class="btn-save">Apply</button></form></div>`)
 
 	// bookmarks shown only on index
 	if bookmarkingEnabled {
@@ -863,8 +907,6 @@ func indexHandler(w http.ResponseWriter, r *http.Request) {
 		if tiles.Len() > 0 {
 			_, _ = io.WriteString(w, `<div class="bm-grid">`+tiles.String()+`</div>`)
 		}
-		_, _ = io.WriteString(w, `<div class="export-form"><form method="get" action="/bookmarks/export"><button type="submit" class="btn-save">Export JSON</button></form>`)
-		_, _ = io.WriteString(w, `<form method="post" action="/bookmarks/import" enctype="multipart/form-data" style="margin-left:8px;"><input type="file" name="file" accept="application/json" required><button type="submit" class="btn-save" style="margin-left:8px">Import JSON</button></form></div>`)
 		_, _ = io.WriteString(w, `</div>`)
 	}
 
@@ -939,16 +981,16 @@ func searchHandler(w http.ResponseWriter, r *http.Request) {
 	thumbMobile, thumbDesktop, thumbHigh := thumbWidths(imgScale)
 
 	// Start streaming HTML
-	w.Header().Set("Content-Type", "text/html; charset=utf8")
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	_, _ = io.WriteString(w, pageHead(r, q+" - Pinata"))
 	// header: inline search and Save-search form
 	_, _ = io.WriteString(w, `<div class="header" style="margin-bottom:8px;"><a class="brand" href="/">Pinata</a><div class="search-box">`)
 	_, _ = io.WriteString(w, `<form class="search-inline" method="get" action="/search"><input type="text" name="q" value="`+html.EscapeString(q)+`" maxlength="64"><button type="submit">Search</button></form>`)
-	st := newSaveState(r)
+	st := newPageState(r)
 	if bookmarkingEnabled {
 		_, _ = io.WriteString(w, saveFrameTag(st, "q", q, ""))
 	}
-	_, _ = io.WriteString(w, `</div></div>`)
+	_, _ = io.WriteString(w, gearLink+`</div></div>`)
 	_, _ = io.WriteString(w, `<h2 style="margin:4px 0 0 0;">Results for "`+html.EscapeString(q)+`"</h2>`)
 	_, _ = io.WriteString(w, `<div class="img-container">`)
 
@@ -1397,11 +1439,17 @@ func renderPinPage(w http.ResponseWriter, r *http.Request, v pinView) {
 	title := firstNonEmpty(heading, truncateRunes(desc, 80), "Pin")
 	alt := firstNonEmpty(v.Alt, title)
 	full := imageProxyURL(v.Orig, firstNonEmpty(heading, desc))
+	// With GIFs set not to animate, the page shows the still JPEG Pinterest
+	// keeps for every size; the image still links to the animated original.
+	shown := full
+	if still := variantURL(v.Orig, "736x"); still != "" && strings.HasSuffix(strings.ToLower(v.Orig), ".gif") && !animateGIFs(r) {
+		shown = imageProxyURL(still, firstNonEmpty(heading, desc))
+	}
 
 	var b strings.Builder
 	b.WriteString(pageHead(r, title+" - Pinata"))
-	b.WriteString(`<div class="header"><a class="brand" href="/">Pinata</a><div class="search-box"><form class="search-inline" method="get" action="/search"><input type="text" name="q" placeholder="Search Image" required maxlength="64"><button type="submit">Search</button></form></div></div>`)
-	b.WriteString(`<div class="pin"><div class="pin-media"><a href="` + html.EscapeString(full) + `" target="_blank" rel="noreferrer"><img src="` + html.EscapeString(full) + `" alt="` + html.EscapeString(alt) + `"` + placeholderStyle(v.Color))
+	b.WriteString(`<div class="header"><a class="brand" href="/">Pinata</a><div class="search-box"><form class="search-inline" method="get" action="/search"><input type="text" name="q" placeholder="Search Image" required maxlength="64"><button type="submit">Search</button></form>` + gearLink + `</div></div>`)
+	b.WriteString(`<div class="pin"><div class="pin-media"><a href="` + html.EscapeString(full) + `" target="_blank" rel="noreferrer"><img src="` + html.EscapeString(shown) + `" alt="` + html.EscapeString(alt) + `"` + placeholderStyle(v.Color))
 	if v.Width > 0 && v.Height > 0 {
 		b.WriteString(fmt.Sprintf(` width="%d" height="%d"`, v.Width, v.Height))
 	}
@@ -1447,7 +1495,7 @@ func renderPinPage(w http.ResponseWriter, r *http.Request, v pinView) {
 		b.WriteString(`<a class="magnifier" href="/revsearch?b64=` + base64.StdEncoding.EncodeToString([]byte(v.Orig)) + `" title="Reverse image search" target="_blank">🔍</a>`)
 	}
 	if bookmarkingEnabled {
-		b.WriteString(pinSaveFrame(newSaveState(r), v.Link, v.Orig))
+		b.WriteString(pinSaveFrame(newPageState(r), v.Link, v.Orig))
 	}
 	b.WriteString(`<a class="btn-save" href="` + html.EscapeString(full) + `" target="_blank" rel="noreferrer" style="text-decoration:none;">Full size</a>`)
 	b.WriteString(`</div></div></div></body></html>`)
@@ -1830,15 +1878,17 @@ func saveTarget(typ, v, img string) (string, string, bool) {
 	return "", "", false
 }
 
-// saveState is what a page needs to draw its save buttons: the accent color
-// and what is already bookmarked, read once per page.
-type saveState struct {
-	accent string
-	saved  map[string]bool
+// pageState is what a page needs to draw its cards and save buttons: the
+// accent color, the GIF setting and what is already bookmarked, read once
+// per page.
+type pageState struct {
+	accent  string
+	animate bool
+	saved   map[string]bool
 }
 
-func newSaveState(r *http.Request) *saveState {
-	st := &saveState{saved: map[string]bool{}}
+func newPageState(r *http.Request) *pageState {
+	st := &pageState{saved: map[string]bool{}, animate: animateGIFs(r)}
 	st.accent, _ = getThemeVars(r)
 	for _, e := range readBookmarksFromReq(r) {
 		st.saved[e.Type+"|"+e.Value] = true
@@ -1850,7 +1900,7 @@ func newSaveState(r *http.Request) *saveState {
 // document is inline (srcdoc), so it shows up with the page instead of
 // costing one more request per card; pressing it posts to /frame/save,
 // which answers with the button in its new state inside the same frame.
-func saveFrameTag(st *saveState, typ, v, img string) string {
+func saveFrameTag(st *pageState, typ, v, img string) string {
 	class, title := "save-frame", "Save pin"
 	if typ == "q" {
 		class, title = "save-frame save-frame-q", "Save search"
@@ -1863,7 +1913,7 @@ func saveFrameTag(st *saveState, typ, v, img string) string {
 
 // pinSaveFrame returns the save button for a pin: it saves the pin page link,
 // or just the image when the link is too long to store.
-func pinSaveFrame(st *saveState, link, img string) string {
+func pinSaveFrame(st *pageState, link, img string) string {
 	if strings.HasPrefix(link, "/pin/") && len(link) <= maxPinLink {
 		return saveFrameTag(st, "pin", link, img)
 	}
@@ -2039,11 +2089,11 @@ func bookmarksImportHandler(w http.ResponseWriter, r *http.Request) {
 					entries = append(entries, BookmarkEntry{Type: "q", Value: s})
 				}
 			} else {
-				http.Redirect(w, r, "/", http.StatusSeeOther)
+				renderErrorPage(w, r, http.StatusBadRequest, "That file isn't a Pinata bookmarks export.")
 				return
 			}
 		} else {
-			http.Redirect(w, r, "/", http.StatusSeeOther)
+			renderErrorPage(w, r, http.StatusBadRequest, "That file isn't a Pinata bookmarks export.")
 			return
 		}
 	}
@@ -2081,6 +2131,7 @@ func bookmarksImportHandler(w http.ResponseWriter, r *http.Request) {
 // ---------- main ----------
 func main() {
 	mux := http.NewServeMux()
+	mux.HandleFunc("GET /settings", settingsPageHandler)
 	mux.HandleFunc("POST /settings", settingsPostHandler)
 	mux.HandleFunc("GET /{$}", indexHandler)
 	mux.HandleFunc("GET /search", searchHandler)
