@@ -557,6 +557,19 @@ func getThemeVars(r *http.Request) (string, string) {
 	return accent, imgScale
 }
 
+// footerHTML ends every page: this is a fork, the original it comes from, and
+// where its code lives.
+const footerHTML = `<div class="footer-note">Pinata fork by darlopvil, based on <a href="https://codeberg.org/gigirassy/pinata">Pinata by gigirassy</a> • <a href="https://github.com/darlopvil/pinata-fork">Source code, issues and self-hosting</a></div></body></html>`
+
+// faviconSVG is Pinata's icon, a star piñata.
+const faviconSVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><path fill="#f59e0b" d="M26.7 20.1 L32.0 2.0 L37.3 20.1 Z"/><path fill="#ec4899" d="M38.0 20.5 L55.5 13.3 L44.6 28.7 Z"/><path fill="#22c55e" d="M44.8 29.5 L61.2 38.7 L42.4 39.8 Z"/><path fill="#06b6d4" d="M41.9 40.4 L45.0 59.0 L32.4 45.0 Z"/><path fill="#f59e0b" d="M31.6 45.0 L19.0 59.0 L22.1 40.4 Z"/><path fill="#ec4899" d="M21.6 39.8 L2.8 38.7 L19.2 29.5 Z"/><path fill="#22c55e" d="M19.4 28.7 L8.5 13.3 L26.0 20.5 Z"/><circle cx="32" cy="32" r="15" fill="#7c3aed"/><path d="M19 29h26M19 35h26" stroke="#f1f5f9" stroke-width="3" stroke-linecap="round"/></svg>`
+
+func faviconHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "image/svg+xml")
+	w.Header().Set("Cache-Control", "public, max-age=604800")
+	_, _ = io.WriteString(w, faviconSVG)
+}
+
 // gearLink opens the settings page; every page header has it. It carries
 // the page it was pressed on, so saving the settings goes back there.
 func gearLink(r *http.Request) string {
@@ -578,7 +591,7 @@ const cssContent = `:root{--bg:#0b0f17;--muted:#94a3b8;--text:#e6e6ff;--accent:#
 func pageHead(r *http.Request, title string) string {
 	accent, imgScale := getThemeVars(r)
 	vars := fmt.Sprintf(`:root{--accent:%s;--accent-rgba:%s;--img-scale:%s;}`, html.EscapeString(accent), html.EscapeString(hexToRGBA(accent, 0.12)), html.EscapeString(imgScale))
-	return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>` + html.EscapeString(title) + `</title><style>` + cssContent + vars + `</style></head><body>`
+	return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>` + html.EscapeString(title) + `</title><link rel="icon" href="/favicon.svg" type="image/svg+xml"><style>` + cssContent + vars + `</style></head><body>`
 }
 
 // settings POST handler: sets accent color and image scale cookies
@@ -630,7 +643,7 @@ func settingsPageHandler(w http.ResponseWriter, r *http.Request) {
 		b.WriteString(`<div class="export-form" style="margin-top:0"><form method="get" action="/bookmarks/export"><button type="submit" class="btn-save">Export JSON</button></form></div>`)
 		b.WriteString(`<form class="export-form" style="margin-top:0" method="post" action="/bookmarks/import" enctype="multipart/form-data"><input type="file" name="file" accept="application/json" required><button type="submit" class="btn-save">Import JSON</button></form></div>`)
 	}
-	b.WriteString(`<div class="footer-note">Powered by Pinata • <a href="https://codeberg.org/gigirassy/pinata/">Contribute to this code or host your own instance!</a></div></body></html>`)
+	b.WriteString(footerHTML)
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
 	_, _ = io.WriteString(w, b.String())
@@ -787,7 +800,7 @@ func renderErrorPage(w http.ResponseWriter, r *http.Request, code int, msg strin
 	w.WriteHeader(code)
 	_, _ = io.WriteString(w, pageHead(r, title+" - Pinata"))
 	_, _ = io.WriteString(w, `<div class="header"><a class="brand" href="/">Pinata</a>`+gearLink(r)+`</div>`)
-	_, _ = io.WriteString(w, `<h2 style="margin:4px 0 8px 0;">`+html.EscapeString(title)+`</h2><p style="color:var(--muted);">`+html.EscapeString(msg)+`</p><p><a href="/">Back to search</a></p></body></html>`)
+	_, _ = io.WriteString(w, `<h2 style="margin:4px 0 8px 0;">`+html.EscapeString(title)+`</h2><p style="color:var(--muted);">`+html.EscapeString(msg)+`</p><p><a href="/">Back to search</a></p>`+footerHTML)
 }
 
 // renderFetchError logs a failed Pinterest request and renders a 502. Only the
@@ -873,9 +886,9 @@ func withErrorPages(mux *http.ServeMux) http.Handler {
 // Index (front) - server-rendered bookmarks and settings form (no JS)
 func indexHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	_, _ = io.WriteString(w, pageHead(r, "Pinata - Search"))
+	_, _ = io.WriteString(w, pageHead(r, "Pinata"))
 	_, _ = io.WriteString(w, `<div class="header"><a class="brand" href="/">Pinata</a>`+gearLink(r)+`</div>`)
-	_, _ = io.WriteString(w, `<div style="color:var(--muted); margin-bottom:12px;">Pinata is an alternate frontend to Pinterest with support for reverse image search, encrypted bookmarks, and image proxying! None of your data ever reaches Pinterest or their servers while using this frontend, and the instance owner can not ever see what you view or bookmarks.</div>`)
+	_, _ = io.WriteString(w, `<div style="color:var(--muted); margin-bottom:12px;">Pinata is a light, JavaScript-free frontend for Pinterest. This server fetches searches, pins and images for you, so Pinterest sees it instead of your browser. Settings and bookmarks stay in your browser, in an encrypted cookie. Your searches do go through this instance: use one you trust, or host your own.</div>`)
 	_, _ = io.WriteString(w, `<form class="search-block" method="get" action="/search"><input type="text" name="q" placeholder="Search Image" required maxlength="64"><button type="submit">Search</button></form>`)
 
 	// bookmarks shown only on index
@@ -920,7 +933,7 @@ func indexHandler(w http.ResponseWriter, r *http.Request) {
 		_, _ = io.WriteString(w, `</div>`)
 	}
 
-	_, _ = io.WriteString(w, `<div class="footer-note">Powered by Pinata • <a href="https://codeberg.org/gigirassy/pinata/">Contribute to this code or host your own instance!</a></div></body></html>`)
+	_, _ = io.WriteString(w, footerHTML)
 }
 
 // searchHandler: streaming results, include inline style variables from cookies
@@ -1079,7 +1092,7 @@ func searchHandler(w http.ResponseWriter, r *http.Request) {
 		next := "/search?q=" + qenc + "&bookmark=" + benc + cenc
 		_, _ = io.WriteString(w, `<div class="pagination"><a href="`+html.EscapeString(next)+`">Next page</a></div>`)
 	}
-	_, _ = io.WriteString(w, `<div class="footer-note">Powered by Pinata • <a href="https://codeberg.org/gigirassy/pinata/">Contribute to this code or host your own instance!</a></div></body></html>`)
+	_, _ = io.WriteString(w, footerHTML)
 }
 
 // ---------- pin page ----------
@@ -1538,7 +1551,7 @@ func renderPinPage(w http.ResponseWriter, r *http.Request, v pinView) {
 		b.WriteString(pinSaveFrame(newPageState(r), v.Link, v.Orig))
 	}
 	b.WriteString(`<a class="btn-save" href="` + html.EscapeString(full) + `" target="_blank" rel="noreferrer" style="text-decoration:none;">Full size</a>`)
-	b.WriteString(`</div></div></div></body></html>`)
+	b.WriteString(`</div></div></div>` + footerHTML)
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	_, _ = io.WriteString(w, b.String())
@@ -2171,6 +2184,10 @@ func bookmarksImportHandler(w http.ResponseWriter, r *http.Request) {
 // ---------- main ----------
 func main() {
 	mux := http.NewServeMux()
+	mux.HandleFunc("GET /favicon.svg", faviconHandler)
+	mux.HandleFunc("GET /favicon.ico", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/favicon.svg", http.StatusMovedPermanently)
+	})
 	mux.HandleFunc("GET /settings", settingsPageHandler)
 	mux.HandleFunc("POST /settings", settingsPostHandler)
 	mux.HandleFunc("GET /{$}", indexHandler)

@@ -14,7 +14,7 @@ services:
       # Enables encrypted bookmarks. Generate a key with: head -c 32 /dev/urandom | base64
       # Leave empty to disable bookmarks.
       - PINATA_BOOKMARK_KEY=
-      # Reverse image search links to TinEye. Set to 1 to hide it.
+      # Set to 1 to hide reverse image search (Yandex, Google Lens, Bing, SauceNAO or TinEye).
       - PINATA_DISABLE_REVERSE=0
       # Optional image proxy that recompresses images (pinata-proxy below).
       # Remove this line and the pinata-proxy service to fetch images directly.
