@@ -21,6 +21,7 @@ This is darlopvil's fork of [Pinata by gigirassy](https://codeberg.org/gigirassy
 - **Animated GIFs** in search results, or still images if you prefer (Animate GIFs: never).
 - **Downloaded images are named after the pin**, instead of `image_proxy`.
 - **Lighter thumbnails**, resized from Pinterest's own JPEG variants instead of the full originals: on 10 test results, 148 KB instead of 20.1 MB with GIFs shown still.
+- **Optional disk cache**: images are kept until a size cap, search pages for 15 minutes and pins for an hour, so reloads, going back and other devices don't ask Pinterest again.
 - **Image placeholders**: real alt text and each pin's dominant color while images load.
 - **Error pages** that say what happened: Pinterest rate-limiting the instance, Pinterest errors, no results, unknown pages.
 - A favicon.
@@ -71,6 +72,9 @@ Requires Go 1.26 or newer. Pinata listens on port 8080.
 | `PINATA_BOOKMARK_KEY` | 32 random bytes in base64: `head -c 32 /dev/urandom \| base64`. Enables bookmarks and signs pin links. Without it, bookmarks are off and pin links stop working whenever the server restarts. Changing it invalidates existing bookmarks and pin links. |
 | `PINATA_IMAGE_BACKEND` | Base URL of an image proxy backend, e.g. `http://pinata-proxy:8081`. Empty: images are fetched directly. |
 | `PINATA_DISABLE_REVERSE` | `1`, `true` or `yes` hides reverse image search. |
+| `PINATA_CACHE_DIR` | Directory for the disk cache, e.g. a mounted volume at `/cache`. Empty: no cache, nothing is written to disk. |
+| `PINATA_CACHE_IMAGES_MB` | Size cap of the image cache, in MB (default 1024). The least recently used images go first. |
+| `PINATA_CACHE_API_MB` | Size cap of the cache of search pages and pins, in MB (default 64). |
 
 ### Behind a reverse proxy
 
@@ -79,7 +83,7 @@ Requires Go 1.26 or newer. Pinata listens on port 8080.
 
 ## Privacy
 
-Pinterest only talks to the server running Pinata. That server does see the searches and pins requested through it, like any proxy: use an instance you trust, or host your own. Pinata doesn't log requests (only startup messages and failures talking to Pinterest) and stores nothing on disk; bookmarks are encrypted with the instance's key and kept in your browser.
+Pinterest only talks to the server running Pinata. That server does see the searches and pins requested through it, like any proxy: use an instance you trust, or host your own. Pinata doesn't log requests (only startup messages, failures talking to Pinterest and cache hit counts); bookmarks are encrypted with the instance's key and kept in your browser. Without the disk cache it writes nothing to disk. With it, the server keeps images it has served, and for a short while the search pages and pins it fetched; file names are hashes, so they don't show what was searched, but the cached pages themselves contain the results.
 
 ## License
 

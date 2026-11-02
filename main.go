@@ -10,6 +10,8 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
+	"encoding/binary"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -20,6 +22,7 @@ import (
 	_ "image/png"
 	"image/jpeg"
 	"io"
+	"io/fs"
 	"log"
 	"math"
 	"mime"
@@ -28,9 +31,12 @@ import (
 	"net/url"
 	"os"
 	"path"
+	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 	"unicode"
 	"unicode/utf8"
@@ -221,6 +227,300 @@ func bookmarksFull(entries []BookmarkEntry) bool {
 	return err == nil && len(enc) > maxCookieValue
 }
 
+// ---------- disk cache ----------
+// Two optional caches under PINATA_CACHE_DIR: images (thumbnails and full
+// size), kept until the size cap evicts the least recently used, and
+// Pinterest API responses (search pages, pins), which also expire. Keys are
+// hashed, so file names never show a search or a URL. Each entry is one
+// file: a short header (magic, metadata length, JSON metadata) and the body.
+
+const (
+	cacheMagic = "PNC1"
+	// Measured on a search: page 1 and 2 were identical after 5 and 15
+	// minutes and had changed by 30 (16/18 and 21/25 images in common), so
+	// search pages live 15 minutes. A pin's fields were unchanged after an
+	// hour, the longest span measured. Page-2 bookmarks and csrftokens from a
+	// page 1 still worked after an hour, so a cached page 1 paginates fine.
+	searchTTL = 15 * time.Minute
+	pinTTL    = 1 * time.Hour
+)
+
+var imageCache, apiCache *diskCache
+
+type diskCache struct {
+	name         string
+	dir          string
+	max          int64 // bytes on disk
+	maxEntry     int64 // larger entries aren't kept
+	mu           sync.Mutex
+	size         int64
+	sweeping     atomic.Bool
+	hits, misses atomic.Int64
+}
+
+// diskSize is the space a file of n bytes takes, in 4 KiB blocks.
+func diskSize(n int64) int64 { return (n + 4095) / 4096 * 4096 }
+
+func newDiskCache(name, dir string, maxMB int64) (*diskCache, error) {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return nil, err
+	}
+	c := &diskCache{name: name, dir: dir, max: maxMB << 20, maxEntry: maxMB << 20 / 10}
+	c.sweep() // measures what is on disk, removes leftovers, enforces the cap
+	return c, nil
+}
+
+func (c *diskCache) path(key string) string {
+	sum := sha256.Sum256([]byte(key))
+	h := hex.EncodeToString(sum[:])
+	return filepath.Join(c.dir, h[:2], h)
+}
+
+// cacheEntry is an entry read from disk; Body is positioned after the header.
+type cacheEntry struct {
+	Meta map[string]string
+	Body io.Reader
+	Size int64 // body bytes
+	f    *os.File
+}
+
+func (e *cacheEntry) Close() { e.f.Close() }
+
+// open returns the entry for key, if present and not older than ttl (0: no
+// expiry). A hit marks the entry as recently used.
+func (c *diskCache) open(key string, ttl time.Duration) (*cacheEntry, bool) {
+	if c == nil {
+		return nil, false
+	}
+	p := c.path(key)
+	f, err := os.Open(p)
+	if err != nil {
+		c.misses.Add(1)
+		return nil, false
+	}
+	var hdr [8]byte
+	meta := map[string]string{}
+	st, err := f.Stat()
+	ok := err == nil
+	if ok {
+		_, err = io.ReadFull(f, hdr[:])
+		ok = err == nil && string(hdr[:4]) == cacheMagic
+	}
+	var mlen int64
+	if ok {
+		mlen = int64(binary.BigEndian.Uint32(hdr[4:]))
+		ok = mlen < 64<<10 && json.NewDecoder(io.LimitReader(f, mlen)).Decode(&meta) == nil
+	}
+	if ok && ttl > 0 {
+		at, _ := strconv.ParseInt(meta["at"], 10, 64)
+		ok = time.Since(time.Unix(at, 0)) < ttl
+	}
+	if !ok {
+		f.Close()
+		c.remove(p)
+		c.misses.Add(1)
+		return nil, false
+	}
+	if _, err := f.Seek(8+mlen, io.SeekStart); err != nil {
+		f.Close()
+		c.misses.Add(1)
+		return nil, false
+	}
+	now := time.Now()
+	_ = os.Chtimes(p, now, now)
+	c.hits.Add(1)
+	return &cacheEntry{Meta: meta, Body: f, Size: st.Size() - 8 - mlen, f: f}, true
+}
+
+func (c *diskCache) remove(p string) {
+	if st, err := os.Stat(p); err == nil && os.Remove(p) == nil {
+		c.mu.Lock()
+		c.size -= diskSize(st.Size())
+		c.mu.Unlock()
+	}
+}
+
+// cacheWriter writes an entry to a temporary file; commit renames it into
+// place, so a crash or an aborted download never leaves a partial entry.
+type cacheWriter struct {
+	c    *diskCache
+	key  string
+	f    *os.File
+	n    int64
+	fail bool
+}
+
+// create starts an entry for key. It returns nil (which accepts and drops
+// writes) when the cache is off or the file can't be created.
+func (c *diskCache) create(key string, meta map[string]string) *cacheWriter {
+	if c == nil {
+		return nil
+	}
+	if meta == nil {
+		meta = map[string]string{}
+	}
+	meta["at"] = strconv.FormatInt(time.Now().Unix(), 10)
+	mj, err := json.Marshal(meta)
+	if err != nil {
+		return nil
+	}
+	f, err := os.CreateTemp(c.dir, "tmp-*")
+	if err != nil {
+		return nil
+	}
+	var hdr [8]byte
+	copy(hdr[:4], cacheMagic)
+	binary.BigEndian.PutUint32(hdr[4:], uint32(len(mj)))
+	if _, err := f.Write(append(hdr[:], mj...)); err != nil {
+		f.Close()
+		os.Remove(f.Name())
+		return nil
+	}
+	return &cacheWriter{c: c, key: key, f: f}
+}
+
+func (w *cacheWriter) Write(b []byte) (int, error) {
+	if w == nil || w.fail {
+		return len(b), nil
+	}
+	w.n += int64(len(b))
+	if w.n > w.c.maxEntry {
+		w.fail = true
+		return len(b), nil
+	}
+	if _, err := w.f.Write(b); err != nil {
+		w.fail = true
+	}
+	return len(b), nil
+}
+
+func (w *cacheWriter) abort() {
+	if w == nil {
+		return
+	}
+	w.f.Close()
+	os.Remove(w.f.Name())
+}
+
+func (w *cacheWriter) commit() {
+	if w == nil {
+		return
+	}
+	if w.fail || w.f.Sync() != nil {
+		w.abort()
+		return
+	}
+	st, err := w.f.Stat()
+	if w.f.Close() != nil || err != nil {
+		os.Remove(w.f.Name())
+		return
+	}
+	p := w.c.path(w.key)
+	if os.MkdirAll(filepath.Dir(p), 0o700) != nil {
+		os.Remove(w.f.Name())
+		return
+	}
+	var old int64
+	if ost, err := os.Stat(p); err == nil {
+		old = diskSize(ost.Size())
+	}
+	if os.Rename(w.f.Name(), p) != nil {
+		os.Remove(w.f.Name())
+		return
+	}
+	w.c.mu.Lock()
+	w.c.size += diskSize(st.Size()) - old
+	over := w.c.size > w.c.max
+	w.c.mu.Unlock()
+	if over && w.c.sweeping.CompareAndSwap(false, true) {
+		go func() {
+			defer w.c.sweeping.Store(false)
+			w.c.sweep()
+		}()
+	}
+}
+
+// put stores a whole entry at once.
+func (c *diskCache) put(key string, meta map[string]string, body []byte) {
+	w := c.create(key, meta)
+	_, _ = w.Write(body)
+	w.commit()
+}
+
+// teeTo writes to w and, when caching, to cw as well.
+func teeTo(w io.Writer, cw *cacheWriter) io.Writer {
+	if cw == nil {
+		return w
+	}
+	return io.MultiWriter(w, cw)
+}
+
+// sweep measures the cache on disk and, above the cap, deletes the least
+// recently used entries down to 90% of it. Leftover temporary files go too.
+func (c *diskCache) sweep() {
+	type entry struct {
+		path  string
+		size  int64
+		mtime time.Time
+	}
+	var entries []entry
+	var total int64
+	_ = filepath.WalkDir(c.dir, func(p string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return nil
+		}
+		info, err := d.Info()
+		if err != nil {
+			return nil
+		}
+		if strings.HasPrefix(d.Name(), "tmp-") && time.Since(info.ModTime()) > time.Hour {
+			os.Remove(p)
+			return nil
+		}
+		entries = append(entries, entry{p, diskSize(info.Size()), info.ModTime()})
+		total += diskSize(info.Size())
+		return nil
+	})
+	if total > c.max {
+		sort.Slice(entries, func(i, j int) bool { return entries[i].mtime.Before(entries[j].mtime) })
+		for _, e := range entries {
+			if total <= c.max*9/10 {
+				break
+			}
+			if os.Remove(e.path) == nil {
+				total -= e.size
+			}
+		}
+	}
+	c.mu.Lock()
+	c.size = total
+	c.mu.Unlock()
+}
+
+// logCacheStats logs hits, misses and size every 10 minutes when there was
+// traffic: counts only, never keys or URLs.
+func logCacheStats() {
+	for range time.Tick(10 * time.Minute) {
+		var parts []string
+		for _, c := range []*diskCache{imageCache, apiCache} {
+			if c == nil {
+				continue
+			}
+			h, m := c.hits.Swap(0), c.misses.Swap(0)
+			if h+m == 0 {
+				continue
+			}
+			c.mu.Lock()
+			size := c.size
+			c.mu.Unlock()
+			parts = append(parts, fmt.Sprintf("%s %d hits / %d misses, %.1f of %d MB", c.name, h, m, float64(size)/(1<<20), c.max>>20))
+		}
+		if len(parts) > 0 {
+			log.Printf("cache (last 10 min): %s", strings.Join(parts, "; "))
+		}
+	}
+}
+
 // ---------- init: read env ----------
 func init() {
 	// PINATA_BOOKMARK_KEY: base64 32-byte key
@@ -248,6 +548,27 @@ func init() {
 	}
 
 	imageBackendBase = strings.TrimRight(strings.TrimSpace(os.Getenv("PINATA_IMAGE_BACKEND")), "/")
+
+	// PINATA_CACHE_DIR enables the disk caches; the caps are in MB.
+	if dir := strings.TrimSpace(os.Getenv("PINATA_CACHE_DIR")); dir != "" {
+		capMB := func(env string, def int64) int64 {
+			if v, err := strconv.ParseInt(strings.TrimSpace(os.Getenv(env)), 10, 64); err == nil && v > 0 {
+				return v
+			}
+			return def
+		}
+		var err error
+		if imageCache, err = newDiskCache("images", filepath.Join(dir, "images"), capMB("PINATA_CACHE_IMAGES_MB", 1024)); err != nil {
+			log.Printf("image cache disabled: %v", err)
+		}
+		if apiCache, err = newDiskCache("api", filepath.Join(dir, "api"), capMB("PINATA_CACHE_API_MB", 64)); err != nil {
+			log.Printf("API cache disabled: %v", err)
+		}
+		if imageCache != nil || apiCache != nil {
+			log.Println("Disk cache enabled in", dir)
+			go logCacheStats()
+		}
+	}
 
 	// Pin links from search results are signed (see signPinCard). With a
 	// bookmark key, derive a separate key from it so links survive restarts;
@@ -1050,6 +1371,14 @@ func searchHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	dataParam := url.QueryEscape(string(jb))
 
+	cacheKey := "search\x00" + q + "\x00" + bookmark
+	if e, ok := apiCache.open(cacheKey, searchTTL); ok {
+		defer e.Close()
+		w.Header().Set("X-Pinata-Cache", "hit")
+		renderSearchResults(w, r, q, csrftoken, e.Meta["csrf"], e.Body, nil)
+		return
+	}
+
 	var req *http.Request
 	if bookmark == "" {
 		u := pinterestSearchURL + "?data=" + dataParam
@@ -1088,7 +1417,23 @@ func searchHandler(w http.ResponseWriter, r *http.Request) {
 			break
 		}
 	}
+	var copyBody *bytes.Buffer
+	if apiCache != nil {
+		copyBody = &bytes.Buffer{}
+	}
+	if renderSearchResults(w, r, q, csrftoken, newCsrf, resp.Body, copyBody) && copyBody != nil {
+		apiCache.put(cacheKey, map[string]string{"csrf": newCsrf}, copyBody.Bytes())
+	}
+}
 
+// renderSearchResults streams a results page from a Pinterest search
+// response. With copyBody, it also keeps the response there, and it reports
+// whether the response was complete and had results, so worth caching.
+func renderSearchResults(w http.ResponseWriter, r *http.Request, q, csrftoken, newCsrf string, body io.Reader, copyBody *bytes.Buffer) bool {
+	if copyBody != nil {
+		body = io.TeeReader(io.LimitReader(body, 8<<20), copyBody)
+	}
+	complete := true
 	_, imgScale := getThemeVars(r)
 	thumbMobile, thumbDesktop, thumbHigh := thumbWidths(imgScale)
 
@@ -1106,7 +1451,7 @@ func searchHandler(w http.ResponseWriter, r *http.Request) {
 	_, _ = io.WriteString(w, `<h2 style="margin:4px 0 0 0;">Results for "`+html.EscapeString(q)+`"</h2>`)
 	_, _ = io.WriteString(w, `<div class="img-container">`)
 
-	dec := json.NewDecoder(resp.Body)
+	dec := json.NewDecoder(body)
 	var nextBookmark string
 	shown := 0
 
@@ -1117,6 +1462,7 @@ func searchHandler(w http.ResponseWriter, r *http.Request) {
 				break
 			}
 			log.Printf("json token error: %v", err)
+			complete = false
 			break
 		}
 		key, ok := tk.(string)
@@ -1140,6 +1486,7 @@ func searchHandler(w http.ResponseWriter, r *http.Request) {
 				var rObj searchResult
 				if err := dec.Decode(&rObj); err != nil {
 					log.Printf("error decoding result item: %v", err)
+					complete = false
 					break
 				}
 				u := strings.TrimSpace(rObj.Images.Orig.URL)
@@ -1182,6 +1529,7 @@ func searchHandler(w http.ResponseWriter, r *http.Request) {
 		_, _ = io.WriteString(w, `<div class="pagination"><a href="`+html.EscapeString(next)+`">Next page</a></div>`)
 	}
 	_, _ = io.WriteString(w, footerHTML)
+	return complete && shown > 0
 }
 
 // ---------- pin page ----------
@@ -1511,6 +1859,17 @@ func pinHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func pinFromPinterest(w http.ResponseWriter, r *http.Request, id string) {
+	cacheKey := "pin\x00" + id
+	if e, ok := apiCache.open(cacheKey, pinTTL); ok {
+		var p pinData
+		err := json.NewDecoder(e.Body).Decode(&p)
+		e.Close()
+		if err == nil {
+			w.Header().Set("X-Pinata-Cache", "hit")
+			renderPinData(w, r, id, &p)
+			return
+		}
+	}
 	data, _ := json.Marshal(map[string]any{"options": map[string]any{"id": id, "field_set_key": "detailed"}})
 	req, err := http.NewRequestWithContext(r.Context(), "GET", pinterestPinURL+"?data="+url.QueryEscape(string(data)), nil)
 	if err != nil {
@@ -1545,10 +1904,20 @@ func pinFromPinterest(w http.ResponseWriter, r *http.Request, id string) {
 		return
 	}
 	p := body.ResourceResponse.Data
+	if renderPinData(w, r, id, p) {
+		if b, err := json.Marshal(p); err == nil {
+			apiCache.put(cacheKey, nil, b)
+		}
+	}
+}
+
+// renderPinData renders a pin page from PinResource data and reports whether
+// the pin could be shown.
+func renderPinData(w http.ResponseWriter, r *http.Request, id string, p *pinData) bool {
 	orig := fullImage(p.Images["orig"], p.Images["736x"])
 	if !isPinimgURL(orig.URL) {
 		renderErrorPage(w, r, http.StatusBadGateway, "This pin has no image Pinata can show.")
-		return
+		return false
 	}
 	v := pinView{
 		Link: "/pin/" + id, Title: p.Title, Desc: firstNonEmpty(p.CloseupDescription, p.Description),
@@ -1568,6 +1937,7 @@ func pinFromPinterest(w http.ResponseWriter, r *http.Request, id string) {
 		v.Saves = p.Aggregated.Stats.Saves
 	}
 	renderPinPage(w, r, v)
+	return true
 }
 
 func renderPinPage(w http.ResponseWriter, r *http.Request, v pinView) {
@@ -1673,6 +2043,32 @@ func downloadName(s string) string {
 	return strings.Trim(s, " .")
 }
 
+// serveCachedImage writes a cached image with the headers stored with it.
+func serveCachedImage(w http.ResponseWriter, e *cacheEntry) {
+	for _, h := range []string{"Content-Type", "Cache-Control", "ETag", "Last-Modified"} {
+		if v := e.Meta[h]; v != "" {
+			w.Header().Set(h, v)
+		}
+	}
+	w.Header().Set("Content-Length", strconv.FormatInt(e.Size, 10))
+	w.Header().Set("X-Pinata-Cache", "hit")
+	w.WriteHeader(http.StatusOK)
+	bufPtr := copyBufPool.Get().(*[]byte)
+	_, _ = io.CopyBuffer(w, e.Body, *bufPtr)
+	copyBufPool.Put(bufPtr)
+}
+
+// imageMeta is what an image entry keeps of the upstream response headers.
+func imageMeta(h http.Header) map[string]string {
+	m := map[string]string{}
+	for _, k := range []string{"Content-Type", "Cache-Control", "ETag", "Last-Modified"} {
+		if v := h.Get(k); v != "" {
+			m[k] = v
+		}
+	}
+	return m
+}
+
 func imageProxyHandler(w http.ResponseWriter, r *http.Request) {
 	uq := r.URL.Query().Get("url")
 	if uq == "" {
@@ -1698,6 +2094,26 @@ func imageProxyHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	if !strings.EqualFold(parsed.Hostname(), "i.pinimg.com") {
 		http.Error(w, "proxy allowed only for i.pinimg.com", http.StatusForbidden)
+		return
+	}
+
+	// Without this, browsers save every image as "image_proxy".
+	setImageName := func() {
+		base := path.Base(parsed.Path)
+		ext := path.Ext(base)
+		name := downloadName(r.URL.Query().Get("name"))
+		if name == "" {
+			name = strings.TrimSuffix(base, ext)
+		}
+		if cd := mime.FormatMediaType("inline", map[string]string{"filename": name + ext}); cd != "" {
+			w.Header().Set("Content-Disposition", cd)
+		}
+	}
+	cacheKey := "image\x00" + strconv.FormatBool(useImageBackend()) + "\x00" + parsed.String()
+	if e, ok := imageCache.open(cacheKey, 0); ok {
+		defer e.Close()
+		setImageName()
+		serveCachedImage(w, e)
 		return
 	}
 
@@ -1729,24 +2145,22 @@ func imageProxyHandler(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set(h, v)
 		}
 	}
-	// Without this, browsers save every image as "image_proxy".
+	var cw *cacheWriter
 	if resp.StatusCode == http.StatusOK {
-		base := path.Base(parsed.Path)
-		ext := path.Ext(base)
-		name := downloadName(r.URL.Query().Get("name"))
-		if name == "" {
-			name = strings.TrimSuffix(base, ext)
-		}
-		if cd := mime.FormatMediaType("inline", map[string]string{"filename": name + ext}); cd != "" {
-			w.Header().Set("Content-Disposition", cd)
-		}
+		setImageName()
+		cw = imageCache.create(cacheKey, imageMeta(resp.Header))
 	}
 
 	w.WriteHeader(resp.StatusCode)
 	bufPtr := copyBufPool.Get().(*[]byte)
 	buf := *bufPtr
-	_, _ = io.CopyBuffer(w, resp.Body, buf)
+	_, err = io.CopyBuffer(teeTo(w, cw), resp.Body, buf)
 	copyBufPool.Put(bufPtr)
+	if err != nil {
+		cw.abort()
+		return
+	}
+	cw.commit()
 }
 
 func thumbWidths(scaleStr string) (int, int, int) {
@@ -1837,6 +2251,13 @@ func thumbImageProxyHandler(w http.ResponseWriter, r *http.Request) {
 		targetW = 1040
 	}
 
+	cacheKey := fmt.Sprintf("thumb\x00%t\x00%s\x00%d", useImageBackend(), parsed.String(), targetW)
+	if e, ok := imageCache.open(cacheKey, 0); ok {
+		defer e.Close()
+		serveCachedImage(w, e)
+		return
+	}
+
 	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
 	defer cancel()
 
@@ -1872,11 +2293,20 @@ func thumbImageProxyHandler(w http.ResponseWriter, r *http.Request) {
 				w.Header().Set(h, v)
 			}
 		}
+		var cw *cacheWriter
+		if resp.StatusCode == http.StatusOK {
+			cw = imageCache.create(cacheKey, imageMeta(resp.Header))
+		}
 		w.WriteHeader(resp.StatusCode)
 		bufPtr := copyBufPool.Get().(*[]byte)
 		buf := *bufPtr
-		_, _ = io.CopyBuffer(w, resp.Body, buf)
+		_, err = io.CopyBuffer(teeTo(w, cw), resp.Body, buf)
 		copyBufPool.Put(bufPtr)
+		if err != nil {
+			cw.abort()
+			return
+		}
+		cw.commit()
 		return
 	}
 
@@ -1899,41 +2329,38 @@ func thumbImageProxyHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// send answers 200 with body and keeps it in the cache.
+	send := func(contentType string, body []byte) {
+		meta := map[string]string{"Content-Type": contentType}
+		if cc := resp.Header.Get("Cache-Control"); cc != "" {
+			meta["Cache-Control"] = cc
+		}
+		for k, v := range meta {
+			w.Header().Set(k, v)
+		}
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(body)
+		imageCache.put(cacheKey, meta, body)
+	}
+	original := func() {
+		ct := resp.Header.Get("Content-Type")
+		if ct == "" {
+			ct = http.DetectContentType(data)
+		}
+		send(ct, data)
+	}
+
 	img, _, err := image.Decode(bytes.NewReader(data))
-	if err != nil {
-		if ct := resp.Header.Get("Content-Type"); ct != "" {
-			w.Header().Set("Content-Type", ct)
-		} else {
-			w.Header().Set("Content-Type", http.DetectContentType(data))
-		}
-		if cc := resp.Header.Get("Cache-Control"); cc != "" {
-			w.Header().Set("Cache-Control", cc)
-		}
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write(data)
+	if err != nil || targetW >= img.Bounds().Dx() {
+		original()
 		return
 	}
-
-	if targetW >= img.Bounds().Dx() {
-		if ct := resp.Header.Get("Content-Type"); ct != "" {
-			w.Header().Set("Content-Type", ct)
-		} else {
-			w.Header().Set("Content-Type", http.DetectContentType(data))
-		}
-		if cc := resp.Header.Get("Cache-Control"); cc != "" {
-			w.Header().Set("Cache-Control", cc)
-		}
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write(data)
+	var out bytes.Buffer
+	if err := jpeg.Encode(&out, resizeNearest(img, targetW), &jpeg.Options{Quality: 82}); err != nil {
+		original()
 		return
 	}
-
-	w.Header().Set("Content-Type", "image/jpeg")
-	if cc := resp.Header.Get("Cache-Control"); cc != "" {
-		w.Header().Set("Cache-Control", cc)
-	}
-	w.WriteHeader(http.StatusOK)
-	_ = jpeg.Encode(w, resizeNearest(img, targetW), &jpeg.Options{Quality: 82})
+	send("image/jpeg", out.Bytes())
 }
 
 // reverseEngines are the reverse image search engines the 🔍 button can use.

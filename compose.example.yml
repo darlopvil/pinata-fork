@@ -19,6 +19,13 @@ services:
       # Optional image proxy that recompresses images (pinata-proxy below).
       # Remove this line and the pinata-proxy service to fetch images directly.
       - PINATA_IMAGE_BACKEND=http://pinata-proxy:8081
+      # Optional disk cache for images, search pages and pins. Uncomment these
+      # lines and the volume below to enable it. Caps are in MB.
+      # - PINATA_CACHE_DIR=/cache
+      # - PINATA_CACHE_IMAGES_MB=1024
+      # - PINATA_CACHE_API_MB=64
+    # volumes:
+    #   - pinata-cache:/cache
     networks:
       - pinata
 
@@ -31,3 +38,6 @@ services:
 
 networks:
   pinata:
+
+# volumes:
+#   pinata-cache:

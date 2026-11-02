@@ -5,7 +5,9 @@ ARG TARGETOS
 ARG TARGETARCH
 
 WORKDIR /src
-RUN apk add --no-cache ca-certificates
+# /cache is the mount point for the optional disk cache, owned by the runtime
+# user so that a fresh named volume mounted there is writable.
+RUN apk add --no-cache ca-certificates && mkdir -p /cache && chown 1000:1000 /cache
 COPY go.mod main.go ./
 
 RUN CGO_ENABLED=0 \
@@ -23,6 +25,7 @@ USER 1000:1000
 COPY --from=builder /pinata /pinata
 COPY --from=thc /thc /thc
 COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
+COPY --from=builder --chown=1000:1000 /cache /cache
 
 ENV GOMEMLIMIT=15MiB \
     GOGC=20 \
