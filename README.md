@@ -8,20 +8,21 @@ This is darlopvil's fork of [Pinata by gigirassy](https://codeberg.org/gigirassy
 
 - **No JavaScript, no database.** A single Go binary in a Docker image of a few megabytes; settings and bookmarks live in the browser, in an encrypted cookie.
 - **Pinterest never sees the browser.** The server fetches searches, pins and images; pages load nothing from other sites.
-- Search, pin pages, bookmarks, reverse image search and an optional [image proxy backend](https://codeberg.org/gigirassy/image-proxy) to recompress images.
+- Search, pin pages, profiles and boards, bookmarks, reverse image search and an optional [image proxy backend](https://codeberg.org/gigirassy/image-proxy) to recompress images.
 
 ## Compared to the original
 
 ### New features
 
 - **Pin pages** at `/pin/{id}`, also in Pinterest's `<slug>--<id>` form, with title, description, source link, pinner, board, date and saves. Search results link to them too: logged-out searches return pin IDs Pinterest won't resolve, so their cards carry the pin's data in a signed link.
+- **Profiles and boards** at their Pinterest paths (`/<user>/`, `/<user>/<board>/`): a profile's boards with their covers, paginated, and a board's pins. Without an account Pinterest serves only one page of a board, so a board shows up to about 100 pins and says how many it holds. Pin pages link to the pinner's profile and to the board.
 - **Save buttons that don't reload the page**, on cards, pin pages and searches. The heart saves the pin, and the homepage shows saved pins as thumbnails that open their pin page.
 - **Settings page** behind a gear icon on every page: accent color, image size, reverse search engine, Animate GIFs, and bookmark export and import. Saving goes back to the page you came from.
 - **Reverse image search** with Yandex (default), Google Lens, Bing, SauceNAO or TinEye, instead of TinEye only.
 - **Animated GIFs** in search results, or still images if you prefer (Animate GIFs: never).
 - **Downloaded images are named after the pin**, instead of `image_proxy`.
 - **Lighter thumbnails**, resized from Pinterest's own JPEG variants instead of the full originals: on 10 test results, 148 KB instead of 20.1 MB with GIFs shown still.
-- **Optional disk cache**: images are kept until a size cap, search pages for 15 minutes and pins for an hour, so reloads, going back and other devices don't ask Pinterest again.
+- **Optional disk cache**: images are kept until a size cap, search pages, profiles and boards for 15 minutes and pins for an hour, so reloads, going back and other devices don't ask Pinterest again.
 - **Image placeholders**: real alt text and each pin's dominant color while images load.
 - **Error pages** that say what happened: Pinterest rate-limiting the instance, Pinterest errors, no results, unknown pages.
 - A favicon.
@@ -74,7 +75,7 @@ Requires Go 1.26 or newer. Pinata listens on port 8080.
 | `PINATA_DISABLE_REVERSE` | `1`, `true` or `yes` hides reverse image search. |
 | `PINATA_CACHE_DIR` | Directory for the disk cache, e.g. a mounted volume at `/cache`. Empty: no cache, nothing is written to disk. |
 | `PINATA_CACHE_IMAGES_MB` | Size cap of the image cache, in MB (default 1024). The least recently used images go first. |
-| `PINATA_CACHE_API_MB` | Size cap of the cache of search pages and pins, in MB (default 64). |
+| `PINATA_CACHE_API_MB` | Size cap of the cache of search pages, profiles, boards and pins, in MB (default 64). |
 
 ### Behind a reverse proxy
 
