@@ -9,6 +9,7 @@ WORKDIR /src
 # user so that a fresh named volume mounted there is writable.
 RUN apk add --no-cache ca-certificates && mkdir -p /cache && chown 1000:1000 /cache
 COPY go.mod main.go ./
+COPY static ./static
 
 RUN CGO_ENABLED=0 \
     GOOS=${TARGETOS:-linux} \

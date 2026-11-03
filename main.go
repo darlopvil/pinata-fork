@@ -9,6 +9,7 @@ import (
 	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
+	_ "embed"
 	"encoding/base64"
 	"encoding/binary"
 	"encoding/hex"
@@ -903,7 +904,7 @@ func gearLink(r *http.Request) string {
 }
 
 // ---------- CSS (uses CSS vars; defaults are present but overridden per-request via inline style) ----------
-const cssContent = `:root{--bg:#0b0f17;--muted:#94a3b8;--text:#e6e6ff;--accent:#7c3aed;--accent-rgba:rgba(124,58,237,0.12);--img-scale:1}*{box-sizing:border-box}html,body{height:100%}body{margin:0;padding:20px;background:linear-gradient(180deg,#071020 0%,var(--bg) 100%);color:var(--text);font-family:ui-monospace,Menlo,Monaco,monospace}a{color:inherit}.header{display:flex;gap:12px;align-items:center;margin-bottom:18px;flex-wrap:wrap}.brand{font-size:20px;font-weight:700;color:var(--accent);text-decoration:none}.search-box{margin-left:auto;display:flex;gap:8px;align-items:center;justify-content:flex-end;flex:0 1 auto}.gear{display:inline-flex;align-items:center;justify-content:center;flex:none;width:36px;height:36px;border-radius:8px;border:1px solid rgba(255,255,255,0.06);color:var(--muted);font-size:18px;text-decoration:none}.header>.gear{margin-left:auto}.gear:hover,.gear[aria-current]{color:var(--text);border-color:var(--accent)}.settings{max-width:560px;display:flex;flex-direction:column;gap:14px;margin-top:14px}.settings label{display:flex;justify-content:space-between;align-items:center;gap:12px;font-size:14px;color:var(--muted)}.settings h3{margin:18px 0 0;font-size:15px}.settings .note{font-size:13px;color:var(--muted);margin:0}.settings .export-form{flex-wrap:wrap}.search-block{width:100%;display:flex;gap:8px;margin-top:14px}.search-inline{display:flex;gap:8px;align-items:center;min-width:0}input[type="text"]{background:transparent;border:1px solid rgba(255,255,255,0.06);padding:8px 12px;color:var(--text);min-width:120px;border-radius:8px;outline:none}button[type="submit"],.btn-save{background:linear-gradient(90deg,var(--accent),#5b21b6);color:white;border:none;padding:8px 12px;border-radius:8px;cursor:pointer}.btn-save{font-weight:600}.img-container{column-width:calc(260px * var(--img-scale));column-gap:16px;width:100%;max-width:1400px;margin-top:18px}.card{display:inline-block;width:100%;margin:0 0 16px;border-radius:10px;overflow:hidden;background:linear-gradient(180deg,rgba(255,255,255,0.01),rgba(255,255,255,0.02));box-shadow:0 6px 18px rgba(3,7,18,0.6);border:1px solid rgba(124,58,237,0.06);break-inside:avoid;-webkit-column-break-inside:avoid;min-height:0;position:relative}.card a{text-decoration:none}.card img{display:block;width:100%;height:auto;object-fit:cover;background:#08101a;font-size:12px;line-height:1.4;overflow:hidden}.card-controls{position:absolute;top:8px;right:8px;display:flex;gap:8px;align-items:center}.btn-save-mini{background:rgba(0,0,0,0.45);border:1px solid rgba(255,255,255,0.06);color:var(--text);padding:6px;border-radius:999px;cursor:pointer;font-weight:700;display:inline-flex;align-items:center;justify-content:center;width:34px;height:34px;text-decoration:none}.magnifier{background:rgba(0,0,0,0.45);border:1px solid rgba(255,255,255,0.06);color:var(--text);padding:6px;border-radius:999px;font-size:14px;width:34px;height:34px;display:inline-flex;align-items:center;justify-content:center;text-decoration:none}.bookmarks{margin-left:12px;color:var(--muted);font-size:14px}.bookmark-list{margin-top:10px;display:flex;gap:8px;flex-wrap:wrap}.bookmark-pill{background:rgba(255,255,255,0.03);padding:6px 8px;border-radius:999px;border:1px solid rgba(255,255,255,0.04);font-size:13px;display:flex;gap:6px;align-items:center}.bookmark-pill form{display:inline}.bookmark-remove-btn{background:transparent;border:none;color:#ff7b7b;font-weight:700;cursor:pointer;padding:0 6px}.bm-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:10px;margin-top:12px;max-width:1100px}.bm-tile{position:relative;aspect-ratio:3/4;border-radius:10px;overflow:hidden;background:#08101a;border:1px solid rgba(255,255,255,0.04)}.bm-tile img{display:block;width:100%;height:100%;object-fit:cover;font-size:12px;color:var(--muted)}.bm-tile form{position:absolute;top:6px;right:6px;margin:0}.bm-tile .bookmark-remove-btn{width:28px;height:28px;padding:0;border-radius:999px;background:rgba(0,0,0,0.55)}.profile{display:flex;gap:16px;align-items:center;margin:8px 0 18px;flex-wrap:wrap}.profile img{width:96px;height:96px;border-radius:50%;object-fit:cover;background:#08101a}.profile h2{margin:0 0 4px}.profile .meta{color:var(--muted);font-size:14px}.board-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(calc(180px * var(--img-scale)),1fr));gap:16px;max-width:1400px}.board-tile{text-decoration:none;display:block}.board-tile img,.board-empty{display:block;width:100%;aspect-ratio:1;object-fit:cover;border-radius:10px;background:#08101a}.board-tile .name{font-weight:700;margin-top:6px}.board-tile .count{color:var(--muted);font-size:13px}.export-form{margin-top:12px;display:flex;gap:8px;align-items:center}.pagination{text-align:center;margin:26px 0}.pagination a{color:var(--accent);text-decoration:none;padding:8px 12px;border-radius:8px;border:1px solid rgba(124,58,237,0.12);background:rgba(124,58,237,0.02)}.footer-note{color:var(--muted);font-size:12px;margin-top:22px}.pin{display:flex;gap:24px;align-items:flex-start;flex-wrap:wrap;margin-top:18px}.pin-media{flex:0 1 auto;max-width:100%}.pin-media img{display:block;max-width:100%;width:auto;height:auto;border-radius:10px;background:#08101a;font-size:14px;overflow:hidden}@media (min-width:641px){.pin-media img{max-height:85vh}}.pin-info{flex:1 1 280px;max-width:560px}.pin-info h2{margin:0 0 10px}.pin-desc{white-space:pre-line;margin:0 0 12px}.pin-meta{color:var(--muted);font-size:14px;line-height:1.7;margin:0 0 12px}.pin-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.save-frame{display:block;width:34px;height:34px;border:0;background:transparent;overflow:hidden}.save-frame-q{width:96px;height:36px;margin-left:8px}@media (max-width:640px){body{padding:12px;font-size:18px}.board-grid{grid-template-columns:repeat(auto-fill,minmax(calc(140px * var(--img-scale)),1fr));gap:12px}.brand{font-size:22px}input[type="text"]{min-width:120px;padding:12px 14px;font-size:16px}button[type="submit"],.btn-save{padding:10px 14px;font-size:16px;border-radius:10px}.img-container{column-width:calc(180px * var(--img-scale));column-gap:12px}.search-block{gap:10px;flex-direction:column}.search-inline{width:100%}.search-box{margin-left:0;width:100%}.bookmarks{order:3;width:100%;margin-top:8px}}`
+const cssContent = `:root{--bg:#0b0f17;--muted:#94a3b8;--text:#e6e6ff;--accent:#7c3aed;--accent-rgba:rgba(124,58,237,0.12);--img-scale:1}*{box-sizing:border-box}html,body{height:100%}body{margin:0;padding:20px;background:linear-gradient(180deg,#071020 0%,var(--bg) 100%);color:var(--text);font-family:ui-monospace,Menlo,Monaco,monospace}a{color:inherit}.header{display:flex;gap:12px;align-items:center;margin-bottom:18px;flex-wrap:wrap}.brand{font-size:20px;font-weight:700;color:var(--accent);text-decoration:none}.search-box{margin-left:auto;display:flex;gap:8px;align-items:center;justify-content:flex-end;flex:0 1 auto}.gear{display:inline-flex;align-items:center;justify-content:center;flex:none;width:36px;height:36px;border-radius:8px;border:1px solid rgba(255,255,255,0.06);color:var(--muted);font-size:18px;text-decoration:none}.header>.gear{margin-left:auto}.gear:hover,.gear[aria-current]{color:var(--text);border-color:var(--accent)}.settings{max-width:560px;display:flex;flex-direction:column;gap:14px;margin-top:14px}.settings label{display:flex;justify-content:space-between;align-items:center;gap:12px;font-size:14px;color:var(--muted)}.settings h3{margin:18px 0 0;font-size:15px}.settings .note{font-size:13px;color:var(--muted);margin:0}.settings .export-form{flex-wrap:wrap}.search-block{width:100%;display:flex;gap:8px;margin-top:14px}.search-inline{display:flex;gap:8px;align-items:center;min-width:0}input[type="text"]{background:transparent;border:1px solid rgba(255,255,255,0.06);padding:8px 12px;color:var(--text);min-width:120px;border-radius:8px;outline:none}button[type="submit"],.btn-save{background:linear-gradient(90deg,var(--accent),#5b21b6);color:white;border:none;padding:8px 12px;border-radius:8px;cursor:pointer}.btn-save{font-weight:600}.img-container{column-width:calc(260px * var(--img-scale));column-gap:16px;width:100%;max-width:1400px;margin-top:18px}.card{display:inline-block;width:100%;margin:0 0 16px;border-radius:10px;overflow:hidden;background:linear-gradient(180deg,rgba(255,255,255,0.01),rgba(255,255,255,0.02));box-shadow:0 6px 18px rgba(3,7,18,0.6);border:1px solid rgba(124,58,237,0.06);break-inside:avoid;-webkit-column-break-inside:avoid;min-height:0;position:relative}.card a{text-decoration:none}.card img{display:block;width:100%;height:auto;object-fit:cover;background:#08101a;font-size:12px;line-height:1.4;overflow:hidden}.card-controls{position:absolute;top:8px;right:8px;display:flex;gap:8px;align-items:center}.btn-save-mini{background:rgba(0,0,0,0.45);border:1px solid rgba(255,255,255,0.06);color:var(--text);padding:6px;border-radius:999px;cursor:pointer;font-weight:700;display:inline-flex;align-items:center;justify-content:center;width:34px;height:34px;text-decoration:none}.magnifier{background:rgba(0,0,0,0.45);border:1px solid rgba(255,255,255,0.06);color:var(--text);padding:6px;border-radius:999px;font-size:14px;width:34px;height:34px;display:inline-flex;align-items:center;justify-content:center;text-decoration:none}.bookmarks{margin-left:12px;color:var(--muted);font-size:14px}.bookmark-list{margin-top:10px;display:flex;gap:8px;flex-wrap:wrap}.bookmark-pill{background:rgba(255,255,255,0.03);padding:6px 8px;border-radius:999px;border:1px solid rgba(255,255,255,0.04);font-size:13px;display:flex;gap:6px;align-items:center}.bookmark-pill form{display:inline}.bookmark-remove-btn{background:transparent;border:none;color:#ff7b7b;font-weight:700;cursor:pointer;padding:0 6px}.bm-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:10px;margin-top:12px;max-width:1100px}.bm-tile{position:relative;aspect-ratio:3/4;border-radius:10px;overflow:hidden;background:#08101a;border:1px solid rgba(255,255,255,0.04)}.bm-tile img{display:block;width:100%;height:100%;object-fit:cover;font-size:12px;color:var(--muted)}.bm-tile form{position:absolute;top:6px;right:6px;margin:0}.bm-tile .bookmark-remove-btn{width:28px;height:28px;padding:0;border-radius:999px;background:rgba(0,0,0,0.55)}.profile{display:flex;gap:16px;align-items:center;margin:8px 0 18px;flex-wrap:wrap}.profile img{width:96px;height:96px;border-radius:50%;object-fit:cover;background:#08101a}.profile h2{margin:0 0 4px}.profile .meta{color:var(--muted);font-size:14px}.board-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(calc(180px * var(--img-scale)),1fr));gap:16px;max-width:1400px}.board-tile{text-decoration:none;display:block}.board-tile img,.board-empty{display:block;width:100%;aspect-ratio:1;object-fit:cover;border-radius:10px;background:#08101a}.board-tile .name{font-weight:700;margin-top:6px}.board-tile .count{color:var(--muted);font-size:13px}.video-badge{position:absolute;left:8px;top:8px;width:30px;height:30px;border-radius:999px;background:rgba(0,0,0,0.6);color:#fff;font-size:13px;display:flex;align-items:center;justify-content:center;pointer-events:none}.pin-media video{display:block;max-width:100%;width:auto;height:auto;border-radius:10px;background:#08101a}.export-form{margin-top:12px;display:flex;gap:8px;align-items:center}.pagination{text-align:center;margin:26px 0}.pagination a{color:var(--accent);text-decoration:none;padding:8px 12px;border-radius:8px;border:1px solid rgba(124,58,237,0.12);background:rgba(124,58,237,0.02)}.footer-note{color:var(--muted);font-size:12px;margin-top:22px}.pin{display:flex;gap:24px;align-items:flex-start;flex-wrap:wrap;margin-top:18px}.pin-media{flex:0 1 auto;max-width:100%}.pin-media img{display:block;max-width:100%;width:auto;height:auto;border-radius:10px;background:#08101a;font-size:14px;overflow:hidden}@media (min-width:641px){.pin-media img,.pin-media video{max-height:85vh}}.pin-info{flex:1 1 280px;max-width:560px}.pin-info h2{margin:0 0 10px}.pin-desc{white-space:pre-line;margin:0 0 12px}.pin-meta{color:var(--muted);font-size:14px;line-height:1.7;margin:0 0 12px}.pin-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.save-frame{display:block;width:34px;height:34px;border:0;background:transparent;overflow:hidden}.save-frame-q{width:96px;height:36px;margin-left:8px}@media (max-width:640px){body{padding:12px;font-size:18px}.board-grid{grid-template-columns:repeat(auto-fill,minmax(calc(140px * var(--img-scale)),1fr));gap:12px}.brand{font-size:22px}input[type="text"]{min-width:120px;padding:12px 14px;font-size:16px}button[type="submit"],.btn-save{padding:10px 14px;font-size:16px;border-radius:10px}.img-container{column-width:calc(180px * var(--img-scale));column-gap:12px}.search-block{gap:10px;flex-direction:column}.search-inline{width:100%}.search-box{margin-left:0;width:100%}.bookmarks{order:3;width:100%;margin-top:8px}}`
 
 // ---------- handlers ----------
 
@@ -1093,7 +1094,11 @@ func renderCardHTML(st *pageState, r *searchResult, href string, thumbMobile, th
 	}
 	alt := firstNonEmpty(r.Title, r.GridTitle, r.AutoAltText, r.SeoAltText, truncateRunes(r.Description, 150), "Pinterest image")
 	b.WriteString(placeholderStyle(r.DominantColor))
-	b.WriteString(` alt="` + html.EscapeString(alt) + `"></a>`)
+	b.WriteString(` alt="` + html.EscapeString(alt) + `">`)
+	if pinVideoPath(r.Videos, r.StoryPin) != "" {
+		b.WriteString(`<span class="video-badge" title="Video">▶</span>`)
+	}
+	b.WriteString(`</a>`)
 	b.WriteString(`<div class="card-controls">`)
 	if !disableReverse {
 		b.WriteString(`<a class="magnifier" href="/revsearch?b64=`)
@@ -1519,6 +1524,9 @@ func (e *errorPageWriter) WriteHeader(code int) {
 	}
 }
 
+// Unwrap lets http.ResponseController reach the underlying writer.
+func (e *errorPageWriter) Unwrap() http.ResponseWriter { return e.ResponseWriter }
+
 func (e *errorPageWriter) Write(b []byte) (int, error) {
 	if e.replaced {
 		return len(b), nil
@@ -1526,12 +1534,21 @@ func (e *errorPageWriter) Write(b []byte) (int, error) {
 	return e.ResponseWriter.Write(b)
 }
 
-// securityHeaders locks every response down. Pinata ships no JavaScript,
-// embeds nothing from other sites and serves all its images itself, so the
-// policy can be strict: inline styles are the only exception. Frames are
-// allowed from the instance itself only, for the save button frames.
+// securityHeaders locks every response down. Pinata embeds nothing from
+// other sites and serves all its images and videos itself, so the policy can
+// be strict: inline styles are the only exception. Frames are allowed from
+// the instance itself only, for the save button frames. Scripts are allowed
+// only on pin pages with an idea pin video (cspVideoJS).
+const (
+	cspBase = "default-src 'none'; img-src 'self'; style-src 'unsafe-inline'; form-action 'self'; frame-src 'self'; frame-ancestors 'self'; base-uri 'none'"
+	csp     = cspBase + "; media-src 'self'"
+	// cspVideoJS is for pin pages that play an idea pin video with hls.js:
+	// its own scripts, playlist and segment requests to the instance, and
+	// the blob: URL of the media source it feeds the <video>.
+	cspVideoJS = cspBase + "; media-src 'self' blob:; script-src 'self'; connect-src 'self'"
+)
+
 func securityHeaders(next http.Handler) http.Handler {
-	const csp = "default-src 'none'; img-src 'self'; style-src 'unsafe-inline'; form-action 'self'; frame-src 'self'; frame-ancestors 'self'; base-uri 'none'"
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		h := w.Header()
 		h.Set("Content-Security-Policy", csp)
@@ -1826,6 +1843,9 @@ type pinData struct {
 	CreatedAt          string `json:"created_at"`
 	IsVideo            bool   `json:"is_video"`
 
+	Videos   json.RawMessage `json:"videos"`
+	StoryPin json.RawMessage `json:"story_pin_data"`
+
 	Images map[string]pinImage `json:"images"`
 
 	Pinner *struct {
@@ -1880,6 +1900,7 @@ type searchResult struct {
 	Link        string          `json:"link"`
 	CreatedAt   string          `json:"created_at"`
 	Videos      json.RawMessage `json:"videos"`
+	StoryPin    json.RawMessage `json:"story_pin_data"`
 	Images      struct {
 		Orig pinImage `json:"orig"`
 		X474 pinImage `json:"474x"`
@@ -1945,6 +1966,7 @@ type pinCard struct {
 	S int    `json:"s,omitempty"` // saves
 	V bool   `json:"v,omitempty"` // video pin
 	K string `json:"k,omitempty"` // dominant color
+	X string `json:"x,omitempty"` // video path under videoCDN
 	L string `json:"l,omitempty"` // source link
 }
 
@@ -1965,6 +1987,7 @@ type pinView struct {
 	CreatedAt  string
 	Saves      int
 	IsVideo    bool
+	Video      string // video path under videoCDN, when known
 	Color      string // dominant color, for the placeholder
 	Link       string // this pin page's link, for bookmarks
 }
@@ -2074,6 +2097,7 @@ func cardHref(r *searchResult) string {
 		M: r.Domain,
 		C: r.CreatedAt,
 		V: len(r.Videos) > 0 && string(r.Videos) != "null",
+		X: pinVideoPath(r.Videos, r.StoryPin),
 		K: r.DominantColor,
 		L: sourceLink(r.Link),
 	}
@@ -2115,7 +2139,7 @@ func pinHandler(w http.ResponseWriter, r *http.Request) {
 		if c, ok := openPinCard(id, q.Get("d"), q.Get("s")); ok {
 			renderPinPage(w, r, pinView{
 				Link: r.URL.RequestURI(), Title: c.T, Desc: c.D, Orig: c.O, Width: c.W, Height: c.H, Alt: c.A,
-				Domain: c.M, PinnerUser: c.U, PinnerName: c.N, Board: c.B, BoardURL: c.R, CreatedAt: c.C, Saves: c.S, IsVideo: c.V, Color: c.K, SourceURL: c.L,
+				Domain: c.M, PinnerUser: c.U, PinnerName: c.N, Board: c.B, BoardURL: c.R, CreatedAt: c.C, Saves: c.S, IsVideo: c.V || c.X != "", Video: c.X, Color: c.K, SourceURL: c.L,
 			})
 			return
 		}
@@ -2188,6 +2212,7 @@ func renderPinData(w http.ResponseWriter, r *http.Request, id string, p *pinData
 		Link: "/pin/" + id, Title: p.Title, Desc: firstNonEmpty(p.CloseupDescription, p.Description),
 		Orig: orig.URL, Width: orig.Width, Height: orig.Height, Alt: firstNonEmpty(p.AltText, p.AutoAltText),
 		SourceURL: p.Link, Domain: p.Domain, CreatedAt: p.CreatedAt, IsVideo: p.IsVideo, Color: p.DominantColor,
+		Video: pinVideoPath(p.Videos, p.StoryPin),
 	}
 	if v.Title == "" {
 		v.Title = p.GridTitle
@@ -2229,11 +2254,23 @@ func renderPinPage(w http.ResponseWriter, r *http.Request, v pinView) {
 	var b strings.Builder
 	b.WriteString(pageHead(r, title+" - Pinata"))
 	b.WriteString(`<div class="header"><a class="brand" href="/">Pinata</a><div class="search-box"><form class="search-inline" method="get" action="/search"><input type="text" name="q" placeholder="Search Image" required maxlength="64"><button type="submit">Search</button></form>` + gearLink(r) + `</div></div>`)
-	b.WriteString(`<div class="pin"><div class="pin-media"><a href="` + html.EscapeString(full) + `" target="_blank" rel="noreferrer"><img src="` + html.EscapeString(shown) + `" alt="` + html.EscapeString(alt) + `"` + placeholderStyle(v.Color))
+	dims := ""
 	if v.Width > 0 && v.Height > 0 {
-		b.WriteString(fmt.Sprintf(` width="%d" height="%d"`, v.Width, v.Height))
+		dims = fmt.Sprintf(` width="%d" height="%d"`, v.Width, v.Height)
 	}
-	b.WriteString(` decoding="async"></a></div><div class="pin-info">`)
+	usesJS := false
+	switch {
+	case strings.HasSuffix(v.Video, ".mp4"):
+		// Nothing downloads until play is pressed, and nothing plays by itself.
+		b.WriteString(`<div class="pin"><div class="pin-media"><video controls preload="none" playsinline poster="` + html.EscapeString(shown) + `" src="/video/` + html.EscapeString(v.Video) + `"` + dims + placeholderStyle(v.Color) + `></video></div><div class="pin-info">`)
+	case strings.HasSuffix(v.Video, ".m3u8"):
+		usesJS = true
+		b.WriteString(`<div class="pin"><div class="pin-media"><video controls preload="none" playsinline poster="` + html.EscapeString(shown) + `" data-hls="/video/` + html.EscapeString(v.Video) + `" aria-describedby="video-note"` + dims + placeholderStyle(v.Color) + `></video>`)
+		b.WriteString(`<p class="pin-meta" id="video-note">This idea pin video plays with hls.js, free software (Apache-2.0) served by this instance: it needs JavaScript enabled.</p>`)
+		b.WriteString(`<script src="` + hlsJSPath + `" defer></script><script src="` + videoJSPath + `" defer></script></div><div class="pin-info">`)
+	default:
+		b.WriteString(`<div class="pin"><div class="pin-media"><a href="` + html.EscapeString(full) + `" target="_blank" rel="noreferrer"><img src="` + html.EscapeString(shown) + `" alt="` + html.EscapeString(alt) + `"` + placeholderStyle(v.Color) + dims + ` decoding="async"></a></div><div class="pin-info">`)
+	}
 	if heading != "" {
 		b.WriteString(`<h2>` + html.EscapeString(heading) + `</h2>`)
 	}
@@ -2242,8 +2279,8 @@ func renderPinPage(w http.ResponseWriter, r *http.Request, v pinView) {
 	}
 
 	b.WriteString(`<div class="pin-meta">`)
-	if v.IsVideo {
-		b.WriteString(`<div>This is a video pin: Pinata shows its cover image, video playback isn't supported yet.</div>`)
+	if v.IsVideo && v.Video == "" {
+		b.WriteString(`<div>This is a video pin, but Pinterest sent no video Pinata can play: here is its cover image.</div>`)
 	}
 	if lu, err := url.Parse(v.SourceURL); err == nil && (lu.Scheme == "http" || lu.Scheme == "https") && lu.Host != "" {
 		b.WriteString(`<div>Source: <a href="` + html.EscapeString(lu.String()) + `" target="_blank" rel="noreferrer noopener">` + html.EscapeString(firstNonEmpty(v.Domain, lu.Hostname())) + `</a></div>`)
@@ -2288,7 +2325,187 @@ func renderPinPage(w http.ResponseWriter, r *http.Request, v pinView) {
 	b.WriteString(`</div></div></div>` + footerHTML)
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	if usesJS {
+		w.Header().Set("Content-Security-Policy", cspVideoJS)
+	}
 	_, _ = io.WriteString(w, b.String())
+}
+
+// ---------- video ----------
+// Pinterest serves videos from v1.pinimg.com. Regular video pins ("mc") have
+// a 720p MP4 next to their HLS playlist, which a plain <video> plays. Idea
+// pins ("iht") only have CMAF HLS with the audio in a separate rendition and
+// no MP4 anywhere (checked: 720p/, mp4/ and expMp4/ _t1-_t7 all answer 403),
+// so they play through hls.js, the only JavaScript Pinata serves. Search
+// pages never load video: their cards keep the still image with a badge.
+
+const videoCDN = "https://v1.pinimg.com/videos/"
+
+//go:embed static/hls.min.js
+var hlsJSRaw []byte
+
+//go:embed static/video.js
+var videoJS []byte
+
+// hlsJS is hls.js labelled for GNU LibreJS (its license is Apache-2.0), and
+// without the source map comment, whose file isn't shipped.
+var hlsJS = func() []byte {
+	body := bytes.Replace(hlsJSRaw, []byte("//# sourceMappingURL=hls.min.js.map"), nil, 1)
+	return append(append([]byte("// @license magnet:?xt=urn:btih:8e4f440f4c65981c5bf93c76d35135ba5064d8b7&dn=apache-2.0.txt Apache-2.0\n"), body...), []byte("\n// @license-end\n")...)
+}()
+
+// Script paths carry a hash of their content, so browsers can keep them
+// for good and still get a new version as soon as it changes.
+var hlsJSPath, videoJSPath = scriptPath("hls", hlsJS), scriptPath("video", videoJS)
+
+func scriptPath(name string, body []byte) string {
+	sum := sha256.Sum256(body)
+	return "/static/" + name + "." + hex.EncodeToString(sum[:4]) + ".js"
+}
+
+func scriptHandler(body []byte) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
+		w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+		_, _ = w.Write(body)
+	}
+}
+
+// pinVideoPath picks a pin's video from the "videos" and "story_pin_data"
+// fields Pinterest sends (idea pins keep theirs inside their pages) and
+// returns its path under videoCDN: an MP4 when there is one, else the HLS
+// playlist. "" means the pin has no video Pinata can play.
+func pinVideoPath(fields ...json.RawMessage) string {
+	var mp4, hls4, hls string
+	var walk func(any)
+	walk = func(o any) {
+		switch v := o.(type) {
+		case map[string]any:
+			if list, ok := v["video_list"].(map[string]any); ok {
+				for format, x := range list {
+					item, _ := x.(map[string]any)
+					u, _ := item["url"].(string)
+					p, ok := strings.CutPrefix(u, videoCDN)
+					if !ok || !isVideoPath(p) {
+						continue
+					}
+					switch {
+					case strings.HasSuffix(p, ".mp4"):
+						if mp4 == "" || format == "V_720P" {
+							mp4 = p
+						}
+					case format == "V_HLSV4":
+						hls4 = p
+					case strings.HasSuffix(p, ".m3u8") && hls == "":
+						hls = p
+					}
+				}
+			}
+			for _, x := range v {
+				walk(x)
+			}
+		case []any:
+			for _, x := range v {
+				walk(x)
+			}
+		}
+	}
+	for _, f := range fields {
+		if len(f) == 0 || string(f) == "null" {
+			continue
+		}
+		var o any
+		if json.Unmarshal(f, &o) == nil {
+			walk(o)
+		}
+	}
+	if mp4 != "" {
+		return mp4
+	}
+	h := firstNonEmpty(hls4, hls)
+	// Regular video pins keep a 720p MP4 next to the playlist (checked on a
+	// real one: same path with 720p/ for hls/, 206 video/mp4).
+	if rest, ok := strings.CutPrefix(h, "mc/hls/"); ok && strings.HasSuffix(rest, ".m3u8") {
+		return "mc/720p/" + strings.TrimSuffix(rest, ".m3u8") + ".mp4"
+	}
+	return h
+}
+
+// isVideoPath reports whether p is a video file path Pinata may proxy from
+// videoCDN: HLS playlists, their segments and MP4s.
+func isVideoPath(p string) bool {
+	if p == "" || len(p) > 300 || strings.Contains(p, "..") || strings.HasPrefix(p, "/") {
+		return false
+	}
+	for _, c := range p {
+		if !(c == '/' || c == '_' || c == '-' || c == '.' || c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9') {
+			return false
+		}
+	}
+	switch path.Ext(p) {
+	case ".m3u8", ".ts", ".cmfv", ".cmfa", ".m4s", ".mp4", ".m4a", ".aac":
+		return true
+	}
+	return false
+}
+
+// videoClient has no overall timeout: a video streams for as long as it
+// plays. The request context ends it when the browser goes away.
+var videoClient = &http.Client{Transport: httpClient.Transport}
+
+// videoProxyHandler serves /video/<path> from videoCDN, passing Range
+// through so browsers can seek. Playlists are rewritten to point back here
+// should they ever use absolute URLs; relative ones already do.
+func videoProxyHandler(w http.ResponseWriter, r *http.Request) {
+	// Two segments at least, so the route doesn't overlap /<user>/.
+	p := r.PathValue("kind") + "/" + r.PathValue("rest")
+	if !isVideoPath(p) {
+		renderErrorPage(w, r, http.StatusNotFound, "There's no video at this address.")
+		return
+	}
+	req, err := http.NewRequestWithContext(r.Context(), "GET", videoCDN+p, nil)
+	if err != nil {
+		http.Error(w, "failed", http.StatusBadGateway)
+		return
+	}
+	req.Header.Set("User-Agent", "Mozilla/5.0 (X11; Linux x86_64; rv:145.0) Gecko/20100101 Firefox/145.0")
+	if rg := r.Header.Get("Range"); rg != "" && len(rg) < 100 {
+		req.Header.Set("Range", rg)
+	}
+	resp, err := videoClient.Do(req)
+	if err != nil {
+		http.Error(w, "failed to fetch", http.StatusBadGateway)
+		return
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusPartialContent {
+		// The CDN answers 403 for files that don't exist.
+		http.Error(w, "video unavailable", http.StatusNotFound)
+		return
+	}
+	// A video streams for longer than the server's write timeout.
+	_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(30 * time.Minute))
+	for _, h := range []string{"Content-Type", "Content-Length", "Content-Range", "Accept-Ranges", "Cache-Control", "ETag", "Last-Modified"} {
+		if v := resp.Header.Get(h); v != "" {
+			w.Header().Set(h, v)
+		}
+	}
+	if path.Ext(p) == ".m3u8" {
+		body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+		if err != nil {
+			http.Error(w, "failed to read", http.StatusBadGateway)
+			return
+		}
+		body = bytes.ReplaceAll(body, []byte(videoCDN), []byte("/video/"))
+		w.Header().Set("Content-Length", strconv.Itoa(len(body)))
+		w.WriteHeader(resp.StatusCode)
+		_, _ = w.Write(body)
+		return
+	}
+	w.WriteHeader(resp.StatusCode)
+	bufPtr := copyBufPool.Get().(*[]byte)
+	_, _ = io.CopyBuffer(w, resp.Body, *bufPtr)
+	copyBufPool.Put(bufPtr)
 }
 
 // ---------- secure image proxy (only https i.pinimg.com) ----------
@@ -2976,6 +3193,9 @@ func bookmarksImportHandler(w http.ResponseWriter, r *http.Request) {
 func main() {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /favicon.svg", faviconHandler)
+	mux.HandleFunc("GET /video/{kind}/{rest...}", videoProxyHandler)
+	mux.HandleFunc("GET "+hlsJSPath, scriptHandler(hlsJS))
+	mux.HandleFunc("GET "+videoJSPath, scriptHandler(videoJS))
 	mux.HandleFunc("GET /favicon.ico", func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/favicon.svg", http.StatusMovedPermanently)
 	})
