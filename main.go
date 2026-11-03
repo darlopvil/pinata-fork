@@ -1168,6 +1168,126 @@ func ideasHandler(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/search?q="+url.QueryEscape(q), http.StatusFound)
 }
 
+// ---------- short links ----------
+// pin.it/<code> answers 308 to api.pinterest.com/url_shortener/<code>/redirect/,
+// which answers 302 to the pin, board or profile on whichever Pinterest
+// domain the link was shared from (www.pinterest.com.au, www.pinterest.ru...),
+// with tracking parameters (invite_code, sender). Unknown codes go to
+// Pinterest's homepage. Pinata asks the second address directly, one
+// request, and sends the browser to the same page on the instance without
+// the parameters. Short links don't change, so the answer is cached for good.
+
+const pinterestShortenerURL = "https://api.pinterest.com/url_shortener/"
+
+// shortLinkClient doesn't follow redirects: the first one is the answer.
+var shortLinkClient = &http.Client{
+	Timeout:       httpClient.Timeout,
+	Transport:     httpClient.Transport,
+	CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
+}
+
+func isShortCode(s string) bool {
+	if s == "" || len(s) > 20 {
+		return false
+	}
+	for _, c := range s {
+		if !(c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9') {
+			return false
+		}
+	}
+	return true
+}
+
+// pinterestPath returns the instance's path for a Pinterest pin, profile or
+// board URL on any Pinterest domain, without its query.
+func pinterestPath(u *url.URL) (string, bool) {
+	if u == nil || (u.Scheme != "https" && u.Scheme != "http") {
+		return "", false
+	}
+	h := strings.TrimPrefix(strings.ToLower(u.Hostname()), "www.")
+	if !strings.HasPrefix(h, "pinterest.") && !strings.HasSuffix(h, ".pinterest.com") {
+		return "", false
+	}
+	parts := strings.Split(strings.Trim(u.EscapedPath(), "/"), "/")
+	switch {
+	case len(parts) >= 2 && parts[0] == "pin":
+		id := parts[1]
+		if i := strings.LastIndex(id, "--"); i >= 0 {
+			id = id[i+2:]
+		}
+		if isPinID(id) {
+			return "/pin/" + id + "/", true
+		}
+	case len(parts) == 1 && isPinterestUser(parts[0]):
+		return "/" + parts[0] + "/", true
+	case len(parts) == 2 && isBoardPath("/"+parts[0]+"/"+parts[1]+"/"):
+		return "/" + parts[0] + "/" + parts[1] + "/", true
+	}
+	return "", false
+}
+
+// pastedLinkPath returns the instance's path for a Pinterest link pasted in
+// the search box: a short link or a pin, profile or board URL.
+func pastedLinkPath(q string) (string, bool) {
+	if strings.HasPrefix(q, "pin.it/") {
+		q = "https://" + q
+	}
+	u, err := url.Parse(q)
+	if err != nil {
+		return "", false
+	}
+	if strings.EqualFold(u.Hostname(), "pin.it") && (u.Scheme == "https" || u.Scheme == "http") {
+		if code := strings.Trim(u.Path, "/"); isShortCode(code) {
+			return "/pin.it/" + code, true
+		}
+		return "", false
+	}
+	return pinterestPath(u)
+}
+
+// shortLinkHandler serves /pin.it/<code>, a pin.it short link.
+func shortLinkHandler(w http.ResponseWriter, r *http.Request) {
+	code := r.PathValue("code")
+	if !isShortCode(code) {
+		renderErrorPage(w, r, http.StatusNotFound, "That isn't a valid short link.")
+		return
+	}
+	cacheKey := "short\x00" + code
+	if e, ok := apiCache.open(cacheKey, 0); ok {
+		b, err := io.ReadAll(io.LimitReader(e.Body, 400))
+		e.Close()
+		if p := string(b); err == nil && strings.HasPrefix(p, "/") && !strings.HasPrefix(p, "//") {
+			w.Header().Set("X-Pinata-Cache", "hit")
+			http.Redirect(w, r, p, http.StatusFound)
+			return
+		}
+	}
+	req, err := http.NewRequestWithContext(r.Context(), "GET", pinterestShortenerURL+code+"/redirect/", nil)
+	if err != nil {
+		renderErrorPage(w, r, http.StatusInternalServerError, "Couldn't build the request to Pinterest.")
+		return
+	}
+	req.Header.Set("User-Agent", "Mozilla/5.0 (X11; Linux x86_64; rv:145.0) Gecko/20100101 Firefox/145.0")
+	resp, err := shortLinkClient.Do(req)
+	if err != nil {
+		renderFetchError(w, r, "short link", err)
+		return
+	}
+	resp.Body.Close()
+	if resp.StatusCode >= 400 {
+		renderUpstreamError(w, r, "short link", resp)
+		return
+	}
+	loc, _ := resp.Location()
+	p, ok := pinterestPath(loc)
+	if !ok {
+		renderErrorPage(w, r, http.StatusNotFound, "This short link doesn't lead to a pin, board or profile: it has expired or never existed.")
+		return
+	}
+	apiCache.put(cacheKey, nil, []byte(p))
+	http.Redirect(w, r, p, http.StatusFound)
+}
+
 // isPinterestUser reports whether s can be a Pinterest username: ASCII
 // letters, digits and underscores. That keeps files like /robots.txt out.
 func isPinterestUser(s string) bool {
@@ -1635,6 +1755,10 @@ func searchHandler(w http.ResponseWriter, r *http.Request) {
 	q := strings.TrimSpace(r.URL.Query().Get("q"))
 	if q == "" {
 		http.Redirect(w, r, "/", http.StatusSeeOther)
+		return
+	}
+	if p, ok := pastedLinkPath(q); ok {
+		http.Redirect(w, r, p, http.StatusFound)
 		return
 	}
 	if utf8.RuneCountInString(q) > maxQueryRunes {
@@ -3223,7 +3347,9 @@ func main() {
 	mux.HandleFunc("GET /{$}", indexHandler)
 	mux.HandleFunc("GET /search", searchHandler)
 	mux.HandleFunc("GET /pin/{id}", pinHandler)
-	mux.HandleFunc("GET /pin/{id}/{$}", pinHandler)
+	// Pinterest's pin URLs can go on after the ID (/pin/<id>/sent/).
+	mux.HandleFunc("GET /pin/{id}/{rest...}", pinHandler)
+	mux.HandleFunc("GET /pin.it/{code}", shortLinkHandler)
 	mux.HandleFunc("GET /search/{$}", pinterestSearchHandler)
 	mux.HandleFunc("GET /search/{scope}/{$}", pinterestSearchHandler)
 	mux.HandleFunc("GET /ideas/{slug}/{$}", ideasHandler)

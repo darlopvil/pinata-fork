@@ -16,6 +16,7 @@ This is darlopvil's fork of [Pinata by gigirassy](https://codeberg.org/gigirassy
 
 - **Pin pages** at `/pin/{id}`, also in Pinterest's `<slug>--<id>` form, with title, description, source link, pinner, board, date and saves. Search results link to them too: logged-out searches return pin IDs Pinterest won't resolve, so their cards carry the pin's data in a signed link.
 - **Profiles and boards** at their Pinterest paths (`/<user>/`, `/<user>/<board>/`): a profile's boards with their covers, paginated, and a board's pins. Without an account Pinterest serves only one page of a board, so a board shows up to about 100 pins and says how many it holds. Pin pages link to the pinner's profile and to the board.
+- **Short links** (`pin.it/<code>`) at `/pin.it/<code>`: Pinata asks Pinterest once where the link leads, caches the answer for good and opens that pin, board or profile, without the tracking parameters Pinterest adds (`invite_code`, `sender`). Pinterest links pasted in the search box, short or full and from any Pinterest domain, open here too.
 - **Save buttons that don't reload the page**, on cards, pin pages and searches. The heart saves the pin, and the homepage shows saved pins as thumbnails that open their pin page.
 - **Settings page** behind a gear icon on every page: accent color, image size, reverse search engine, Animate GIFs, and bookmark export and import. Saving goes back to the page you came from.
 - **Reverse image search** with Yandex (default), Google Lens, Bing, SauceNAO or TinEye, instead of TinEye only.
