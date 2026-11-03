@@ -1,8 +1,8 @@
 // @license magnet:?xt=urn:btih:8e4f440f4c65981c5bf93c76d35135ba5064d8b7&dn=apache-2.0.txt Apache-2.0
 // Plays idea pin videos (HLS with a separate audio rendition) with hls.js.
-// Pages work without it: the video keeps its poster and a note says why it
-// doesn't play. Only the small playlist loads before play is pressed, and
-// nothing plays by itself.
+// Pages work without it: the video shows its poster, without controls, and
+// a note says why it doesn't play. Only the small playlist loads before play
+// is pressed, and nothing plays by itself.
 (function () {
   "use strict";
   var videos = document.querySelectorAll("video[data-hls]");
@@ -25,6 +25,7 @@
     } else {
       return; // keep the note
     }
+    video.controls = true;
     if (note) {
       note.hidden = true;
     }

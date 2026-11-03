@@ -812,6 +812,13 @@ func normalizeHexColor(s string) string {
 // black text has the higher contrast). A slow or failed image then still
 // shows its color and a readable title.
 func placeholderStyle(color string) string {
+	if css := placeholderCSS(color); css != "" {
+		return ` style="` + css + `"`
+	}
+	return ""
+}
+
+func placeholderCSS(color string) string {
 	c := normalizeHexColor(color)
 	if c == "" {
 		return ""
@@ -829,7 +836,7 @@ func placeholderStyle(color string) string {
 	if l > 0.179 {
 		text = "#0b0f17"
 	}
-	return ` style="background-color:` + c + `;color:` + text + `"`
+	return "background-color:" + c + ";color:" + text
 }
 
 // hex to rgba string with alpha
@@ -2258,15 +2265,24 @@ func renderPinPage(w http.ResponseWriter, r *http.Request, v pinView) {
 	if v.Width > 0 && v.Height > 0 {
 		dims = fmt.Sprintf(` width="%d" height="%d"`, v.Width, v.Height)
 	}
+	// Videos get their size from the pin image's proportions before anything
+	// loads, as large as images get: otherwise the player starts at the size
+	// of the cover (often small) and jumps when the video arrives, and again
+	// whenever hls.js switches quality.
+	videoStyle := placeholderStyle(v.Color)
+	if v.Width > 0 && v.Height > 0 {
+		videoStyle = fmt.Sprintf(` style="aspect-ratio:%d/%d;width:calc(85vh * %d / %d);%s"`, v.Width, v.Height, v.Width, v.Height, placeholderCSS(v.Color))
+	}
 	usesJS := false
 	switch {
 	case strings.HasSuffix(v.Video, ".mp4"):
 		// Nothing downloads until play is pressed, and nothing plays by itself.
-		b.WriteString(`<div class="pin"><div class="pin-media"><video controls preload="none" playsinline poster="` + html.EscapeString(shown) + `" src="/video/` + html.EscapeString(v.Video) + `"` + dims + placeholderStyle(v.Color) + `></video></div><div class="pin-info">`)
+		b.WriteString(`<div class="pin"><div class="pin-media"><video controls preload="none" playsinline poster="` + html.EscapeString(shown) + `" src="/video/` + html.EscapeString(v.Video) + `"` + dims + videoStyle + `></video></div><div class="pin-info">`)
 	case strings.HasSuffix(v.Video, ".m3u8"):
 		usesJS = true
-		b.WriteString(`<div class="pin"><div class="pin-media"><video controls preload="none" playsinline poster="` + html.EscapeString(shown) + `" data-hls="/video/` + html.EscapeString(v.Video) + `" aria-describedby="video-note"` + dims + placeholderStyle(v.Color) + `></video>`)
-		b.WriteString(`<p class="pin-meta" id="video-note">This idea pin video plays with hls.js, free software (Apache-2.0) served by this instance: it needs JavaScript enabled.</p>`)
+		// No controls until video.js sets the player up: without JavaScript
+		// it would show a play button that does nothing.
+		b.WriteString(`<div class="pin"><div class="pin-media"><video preload="none" playsinline poster="` + html.EscapeString(shown) + `" data-hls="/video/` + html.EscapeString(v.Video) + `" aria-describedby="video-note"` + dims + videoStyle + `></video>`)
 		b.WriteString(`<script src="` + hlsJSPath + `" defer></script><script src="` + videoJSPath + `" defer></script></div><div class="pin-info">`)
 	default:
 		b.WriteString(`<div class="pin"><div class="pin-media"><a href="` + html.EscapeString(full) + `" target="_blank" rel="noreferrer"><img src="` + html.EscapeString(shown) + `" alt="` + html.EscapeString(alt) + `"` + placeholderStyle(v.Color) + dims + ` decoding="async"></a></div><div class="pin-info">`)
@@ -2281,6 +2297,9 @@ func renderPinPage(w http.ResponseWriter, r *http.Request, v pinView) {
 	b.WriteString(`<div class="pin-meta">`)
 	if v.IsVideo && v.Video == "" {
 		b.WriteString(`<div>This is a video pin, but Pinterest sent no video Pinata can play: here is its cover image.</div>`)
+	}
+	if usesJS {
+		b.WriteString(`<div id="video-note">This idea pin video plays with hls.js, free software (Apache-2.0) served by this instance: it needs JavaScript enabled.</div>`)
 	}
 	if lu, err := url.Parse(v.SourceURL); err == nil && (lu.Scheme == "http" || lu.Scheme == "https") && lu.Host != "" {
 		b.WriteString(`<div>Source: <a href="` + html.EscapeString(lu.String()) + `" target="_blank" rel="noreferrer noopener">` + html.EscapeString(firstNonEmpty(v.Domain, lu.Hostname())) + `</a></div>`)
