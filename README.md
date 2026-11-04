@@ -1,6 +1,6 @@
 # Pinata (fork)
 
-A light, JavaScript-free frontend for Pinterest: search, open pins, save bookmarks, all without loading anything from Pinterest in your browser.
+A light frontend for Pinterest, with no JavaScript save for idea pin videos: search, open pins, profiles and boards, follow them by RSS and save bookmarks, all without loading anything from Pinterest in your browser.
 
 This is darlopvil's fork of [Pinata by gigirassy](https://codeberg.org/gigirassy/pinata), with its own features and fixes, listed below. Issues and suggestions are welcome in this repository.
 
@@ -8,7 +8,7 @@ This is darlopvil's fork of [Pinata by gigirassy](https://codeberg.org/gigirassy
 
 - **No JavaScript (one exception, below), no database.** A single Go binary in a Docker image of a few megabytes; settings and bookmarks live in the browser, in an encrypted cookie.
 - **Pinterest never sees the browser.** The server fetches searches, pins and images; pages load nothing from other sites.
-- Search, pin pages, profiles and boards, bookmarks, reverse image search and an optional [image proxy backend](https://codeberg.org/gigirassy/image-proxy) to recompress images.
+- Search, pin pages, profiles and boards, videos, RSS feeds, bookmarks, reverse image search and an optional [image proxy backend](https://codeberg.org/gigirassy/image-proxy) to recompress images.
 
 ## Compared to the original
 
@@ -26,7 +26,7 @@ This is darlopvil's fork of [Pinata by gigirassy](https://codeberg.org/gigirassy
 - **Animated GIFs** in search results, or still images if you prefer (Animate GIFs: never).
 - **Downloaded images are named after the pin**, instead of `image_proxy`, and pin pages have a **Download** button next to "Full size".
 - **Lighter thumbnails**, resized from Pinterest's own JPEG variants instead of the full originals: on 10 test results, 148 KB instead of 20.1 MB with GIFs shown still.
-- **Optional disk cache**: images are kept until a size cap, search pages, profiles and boards for 15 minutes and pins for an hour, so reloads, going back and other devices don't ask Pinterest again.
+- **Optional disk cache**: images are kept until a size cap, search pages, profiles, boards, related pins and feeds for 15 minutes, pins for an hour and short links for good, so reloads, going back, feed readers and other devices don't ask Pinterest again.
 - **Image placeholders**: real alt text and each pin's dominant color while images load.
 - **Error pages** that say what happened: Pinterest rate-limiting the instance, Pinterest errors, no results, unknown pages.
 - A favicon.
@@ -105,7 +105,7 @@ What it costs: the boards opened through the instance are tied to that account, 
 
 ## Privacy
 
-Pinterest only talks to the server running Pinata. That server does see the searches and pins requested through it, like any proxy: use an instance you trust, or host your own. Pinata doesn't log requests (only startup messages, failures talking to Pinterest and cache hit counts); bookmarks are encrypted with the instance's key and kept in your browser. Without the disk cache it writes nothing to disk. With it, the server keeps images it has served, and for a short while the search pages and pins it fetched; file names are hashes, so they don't show what was searched, but the cached pages themselves contain the results. The instance also asks crawlers to stay away (`robots.txt`): every page they followed would be a request to Pinterest, counting toward the rate limit that blocks the instance for everyone.
+Pinterest only talks to the server running Pinata. That server does see the searches and pins requested through it, like any proxy: use an instance you trust, or host your own. Pinata doesn't log requests (only startup messages, failures talking to Pinterest and cache hit counts); bookmarks are encrypted with the instance's key and kept in your browser. Without the disk cache it writes nothing to disk. With it, the server keeps images it has served, and for a short while the search pages and pins it fetched; file names are hashes, so they don't show what was searched, but the cached pages themselves contain the results. With the optional account, Pinterest sees the boards opened through the instance tied to that account. The instance also asks crawlers to stay away (`robots.txt`): every page they followed would be a request to Pinterest, counting toward the rate limit that blocks the instance for everyone.
 
 ## License
 
