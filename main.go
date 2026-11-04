@@ -823,7 +823,7 @@ func renderSearchFeed(w http.ResponseWriter, r *http.Request, q, csrftoken, newC
 			} `json:"data"`
 		} `json:"resource_response"`
 	}
-	if err := json.NewDecoder(io.LimitReader(body, 8<<20)).Decode(&resp); err != nil {
+	if err := json.NewDecoder(io.LimitReader(body, 8<<20)).Decode(&resp); !pinDecodeOK(err) {
 		log.Printf("search feed: unreadable response (decode error: %v)", err)
 		renderErrorPage(w, r, http.StatusBadGateway, "Pinterest sent a response Pinata couldn't read.")
 		return false
@@ -1903,7 +1903,7 @@ func boardPage(w http.ResponseWriter, r *http.Request, user, slug string) {
 		var pins []searchResult
 		for _, it := range items {
 			var res searchResult
-			if json.Unmarshal(it, &res) == nil {
+			if pinDecodeOK(json.Unmarshal(it, &res)) {
 				pins = append(pins, res)
 			}
 		}
@@ -1926,7 +1926,7 @@ func boardPage(w http.ResponseWriter, r *http.Request, user, slug string) {
 	for _, it := range items {
 		// Fresh value per item, as in the search results.
 		var res searchResult
-		if json.Unmarshal(it, &res) != nil || strings.TrimSpace(res.Images.Orig.URL) == "" {
+		if !pinDecodeOK(json.Unmarshal(it, &res)) || strings.TrimSpace(res.Images.Orig.URL) == "" {
 			continue // "story" blocks (Related Interests) have no image
 		}
 		shown++
@@ -2245,7 +2245,7 @@ func renderSearchResults(w http.ResponseWriter, r *http.Request, q, csrftoken, n
 				// key is missing or null, so a reused struct would carry the
 				// previous result's image over.
 				var rObj searchResult
-				if err := dec.Decode(&rObj); err != nil {
+				if err := dec.Decode(&rObj); !pinDecodeOK(err) {
 					log.Printf("error decoding result item: %v", err)
 					complete = false
 					break
@@ -2413,6 +2413,16 @@ var trackingParams = map[string]bool{"fbclid": true, "gclid": true, "igsh": true
 // only, without tracking parameters, and not longer than 512 bytes (in the
 // pins measured, source links ran from 37 to 109 bytes). Anything else is
 // left out, and the pin page then shows just the source domain.
+// pinDecodeOK reports whether a Pinterest item that decoded with err is
+// still usable. A field of an unexpected type is left empty and the rest is
+// filled: "story" blocks in search results have an object for a title, and
+// stopping there lost every result after it. Whether the item has an image
+// decides if it's shown.
+func pinDecodeOK(err error) bool {
+	var te *json.UnmarshalTypeError
+	return err == nil || errors.As(err, &te)
+}
+
 func sourceLink(link string) string {
 	u, err := url.Parse(strings.TrimSpace(link))
 	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
@@ -2811,7 +2821,7 @@ func feedCards(r *http.Request, items []json.RawMessage) (string, int) {
 	shown := 0
 	for _, it := range items {
 		var res searchResult
-		if json.Unmarshal(it, &res) != nil || strings.TrimSpace(res.Images.Orig.URL) == "" {
+		if !pinDecodeOK(json.Unmarshal(it, &res)) || strings.TrimSpace(res.Images.Orig.URL) == "" {
 			continue // "story" blocks have no image
 		}
 		shown++
