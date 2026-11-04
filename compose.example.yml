@@ -24,6 +24,10 @@ services:
       # - PINATA_CACHE_DIR=/cache
       # - PINATA_CACHE_IMAGES_MB=1024
       # - PINATA_CACHE_API_MB=64
+      # Optional throwaway Pinterest account, for board pages only (see README).
+      # Put the two cookies in a .env file next to this one (chmod 600), not here.
+      # - PINATA_PINTEREST_SESSION=${PINATA_PINTEREST_SESSION}
+      # - PINATA_PINTEREST_CSRF=${PINATA_PINTEREST_CSRF}
     # volumes:
     #   - pinata-cache:/cache
     networks:

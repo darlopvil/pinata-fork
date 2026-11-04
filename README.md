@@ -15,7 +15,7 @@ This is darlopvil's fork of [Pinata by gigirassy](https://codeberg.org/gigirassy
 ### New features
 
 - **Pin pages** at `/pin/{id}`, also in Pinterest's `<slug>--<id>` form, with title, description, source link, pinner, board, date and saves. Search results link to them too: logged-out searches return pin IDs Pinterest won't resolve, so their cards carry the pin's data in a signed link.
-- **Profiles and boards** at their Pinterest paths (`/<user>/`, `/<user>/<board>/`): a profile's boards with their covers, paginated, and a board's pins. Without an account Pinterest serves only one page of a board, so a board shows up to about 100 pins and says how many it holds. Pin pages link to the pinner's profile and to the board.
+- **Profiles and boards** at their Pinterest paths (`/<user>/`, `/<user>/<board>/`): a profile's boards with their covers, paginated, and a board's pins, page by page. Without an account Pinterest serves boards only in part (24 pins of a 460-pin board, in one measurement), and Pinata says how many it shows; with the optional account (below), close to the whole board. Pin pages link to the pinner's profile and to the board.
 - **More like this** on pin pages opened by their Pinterest ID (Pinterest links, short links), with further pages: the pins Pinterest relates to that one, fetched alongside the pin so the page doesn't wait longer. Pins opened from search results, boards or other related pins don't get them: Pinterest only gives related pins for a pin's numeric ID, and those pins only come with opaque ones.
 - **Short links** (`pin.it/<code>`) at `/pin.it/<code>`: Pinata asks Pinterest once where the link leads, caches the answer for good and opens that pin, board or profile, without the tracking parameters Pinterest adds (`invite_code`, `sender`). Pinterest links pasted in the search box, short or full and from any Pinterest domain, open here too.
 - **Save buttons that don't reload the page**, on cards, pin pages and searches. The heart saves the pin, and the homepage shows saved pins as thumbnails that open their pin page.
@@ -79,6 +79,7 @@ Requires Go 1.26 or newer. Pinata listens on port 8080.
 | `PINATA_CACHE_DIR` | Directory for the disk cache, e.g. a mounted volume at `/cache`. Empty: no cache, nothing is written to disk. |
 | `PINATA_CACHE_IMAGES_MB` | Size cap of the image cache, in MB (default 1024). The least recently used images go first. |
 | `PINATA_CACHE_API_MB` | Size cap of the cache of search pages, profiles, boards and pins, in MB (default 64). |
+| `PINATA_PINTEREST_SESSION`, `PINATA_PINTEREST_CSRF` | The `_pinterest_sess` and `csrftoken` cookies of an optional throwaway account, used for board pages only (see Pinterest account). Empty: no account. |
 
 ### Behind a reverse proxy
 
@@ -88,6 +89,18 @@ Requires Go 1.26 or newer. Pinata listens on port 8080.
 ## JavaScript
 
 Pinata serves no JavaScript, except on pin pages with an idea pin video: Pinterest keeps those only as HLS with the audio in a separate stream, which browsers can't play from a plain `<video>`. Those pages load [hls.js](https://github.com/video-dev/hls.js) (Apache-2.0, `static/hls.min.js`, version 1.7.3 from npm) and a short script of Pinata's (`static/video.js`, Apache-2.0), both served by the instance and labelled for GNU LibreJS. The Content-Security-Policy allows scripts on those pages only. With JavaScript off, the video shows its poster and a note.
+
+## Pinterest account (optional)
+
+Without an account, Pinterest serves some of its pages only in part. A frontend that works in parts isn't the goal, so an instance can give Pinata a throwaway account. Like JavaScript, it's used only where nothing else works, and as little as possible: today, for board pages only. Searches, pins, profiles and related pins stay logged out, so Pinterest never sees searches tied to the account.
+
+Measured on a 460-pin board: 24 pins logged out, 411 with an account. Board pins then come with their Pinterest ID, so their pin pages also get "More like this".
+
+- Create a throwaway account, log in with a browser, and copy two of its cookies for pinterest.com: `_pinterest_sess` and `csrftoken`.
+- Set them as `PINATA_PINTEREST_SESSION` and `PINATA_PINTEREST_CSRF`, in an env file only the instance can read.
+- If the session stops working (it expired, or Pinterest banned the account), Pinata goes on logged out and logs it once: set new cookies and restart.
+
+What it costs: the boards opened through the instance are tied to that account, and Pinterest may ban it.
 
 ## Privacy
 

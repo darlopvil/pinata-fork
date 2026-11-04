@@ -550,6 +550,19 @@ func init() {
 
 	imageBackendBase = strings.TrimRight(strings.TrimSpace(os.Getenv("PINATA_IMAGE_BACKEND")), "/")
 
+	// PINATA_PINTEREST_SESSION and PINATA_PINTEREST_CSRF: the cookies of an
+	// optional throwaway account (see accountOn).
+	sess, csrf := strings.TrimSpace(os.Getenv("PINATA_PINTEREST_SESSION")), strings.TrimSpace(os.Getenv("PINATA_PINTEREST_CSRF"))
+	switch {
+	case sess == "" && csrf == "":
+	case !isCookieValue(sess) || !isCookieValue(csrf):
+		log.Println("PINATA_PINTEREST_SESSION or PINATA_PINTEREST_CSRF missing or invalid; no Pinterest account")
+	default:
+		pinterestSession, pinterestCSRF = sess, csrf
+		accountWorking.Store(true)
+		log.Println("Pinterest account enabled, for board pages only")
+	}
+
 	// PINATA_CACHE_DIR enables the disk caches; the caps are in MB.
 	if dir := strings.TrimSpace(os.Getenv("PINATA_CACHE_DIR")); dir != "" {
 		capMB := func(env string, def int64) int64 {
@@ -1204,8 +1217,7 @@ func pinterestPath(u *url.URL) (string, bool) {
 	if u == nil || (u.Scheme != "https" && u.Scheme != "http") {
 		return "", false
 	}
-	h := strings.TrimPrefix(strings.ToLower(u.Hostname()), "www.")
-	if !strings.HasPrefix(h, "pinterest.") && !strings.HasSuffix(h, ".pinterest.com") {
+	if !isPinterestHost(u.Hostname()) {
 		return "", false
 	}
 	parts := strings.Split(strings.Trim(u.EscapedPath(), "/"), "/")
@@ -1224,6 +1236,13 @@ func pinterestPath(u *url.URL) (string, bool) {
 		return "/" + parts[0] + "/" + parts[1] + "/", true
 	}
 	return "", false
+}
+
+// isPinterestHost reports whether h is one of Pinterest's domains
+// (www.pinterest.com, es.pinterest.com, www.pinterest.com.au...).
+func isPinterestHost(h string) bool {
+	h = strings.TrimPrefix(strings.ToLower(h), "www.")
+	return strings.HasPrefix(h, "pinterest.") || strings.HasSuffix(h, ".pinterest.com")
 }
 
 // pastedLinkPath returns the instance's path for a Pinterest link pasted in
@@ -1322,10 +1341,9 @@ func isBoardSlug(s string) bool {
 // BoardsResource, BoardResource, BoardFeedResource) answer.
 const pinterestResourceBase = "https://www.pinterest.com/resource/"
 
-// boardPageSize is how many pins a board page asks for. Logged out,
-// Pinterest serves a single page of a board's feed: page 2 always came back
-// empty. Measured on a 452-pin board: page_size 100 returned 94 pins, 250
-// returned only 23, so 100 shows the most a board will give.
+// boardPageSize is how many pins a board page asks for. Measured logged out
+// on a 452-pin board: page_size 100 returned 94 pins, 250 only 23. Logged in,
+// 100 gave 57 to 94 pins a page.
 const boardPageSize = 100
 
 type pinterestUser struct {
@@ -1354,11 +1372,59 @@ type pinterestBoard struct {
 	} `json:"owner"`
 }
 
+// ---------- optional Pinterest account ----------
+// Logged out, Pinterest serves board feeds only in part. Measured: of a
+// 460-pin board, 24 pins in one page; of a 110-pin board, 88 and 11 in two;
+// logged in, 411 of the 460 in six pages, with numeric pin IDs (which get
+// related pins) instead of opaque ones. Searches came back worse logged in
+// (3 pins on a page). So an account, when the instance gives one, is used
+// for board feeds only, and Pinterest doesn't see searches tied to it.
+
+var (
+	pinterestSession, pinterestCSRF string
+	accountWorking                  atomic.Bool
+	// accountHost is where Pinterest sends the account's requests: logged
+	// in, www.pinterest.com answers 302 to the account's country domain
+	// (es.pinterest.com for a Spanish account). Go doesn't carry cookies
+	// over to another host, so the account's requests follow it themselves.
+	accountHost atomic.Pointer[url.URL]
+)
+
+var accountClient = &http.Client{
+	Timeout:       httpClient.Timeout,
+	Transport:     httpClient.Transport,
+	CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
+}
+
+// isCookieValue reports whether s can go in a Cookie header as a value.
+func isCookieValue(s string) bool {
+	if s == "" || len(s) > 4096 {
+		return false
+	}
+	for _, c := range s {
+		if c < 0x21 || c > 0x7e || c == ';' || c == ',' || c == '"' || c == '\\' {
+			return false
+		}
+	}
+	return true
+}
+
+// accountOn reports whether requests that benefit from the account use it.
+func accountOn() bool { return accountWorking.Load() }
+
+// accountFailed turns the account off when Pinterest no longer takes it as
+// logged in (expired or banned): Pinata goes on logged out, as without one.
+func accountFailed() {
+	if accountWorking.CompareAndSwap(true, false) {
+		log.Println("Pinterest account: the session no longer logs in (expired or banned); going on without it. Set new cookies and restart to use it again.")
+	}
+}
+
 // pinterestResource fetches one Pinterest resource and returns its data and
 // pagination bookmark, from the API cache while fresh. On failure it has
 // already written the error page and returns ok == false; notFound, when
 // set, is the message for a resource that doesn't exist.
-func pinterestResource(w http.ResponseWriter, r *http.Request, what, resource, handler string, options map[string]any, cacheKey, notFound string) (json.RawMessage, string, bool) {
+func pinterestResource(w http.ResponseWriter, r *http.Request, what, resource, handler string, options map[string]any, cacheKey, notFound string, account bool) (json.RawMessage, string, bool) {
 	if e, ok := apiCache.open(cacheKey, searchTTL); ok {
 		b, err := io.ReadAll(e.Body)
 		bm := e.Meta["bookmark"]
@@ -1368,14 +1434,43 @@ func pinterestResource(w http.ResponseWriter, r *http.Request, what, resource, h
 			return b, bm, true
 		}
 	}
-	data, _ := json.Marshal(map[string]any{"options": options})
+	params := map[string]any{"options": options}
+	if account {
+		params["context"] = map[string]any{} // as in the requests measured
+	}
+	data, _ := json.Marshal(params)
 	req, err := http.NewRequestWithContext(r.Context(), "GET", pinterestResourceBase+resource+"/get/?data="+url.QueryEscape(string(data)), nil)
 	if err != nil {
 		renderErrorPage(w, r, http.StatusInternalServerError, "Couldn't build the request to Pinterest.")
 		return nil, "", false
 	}
 	req.Header.Set("x-pinterest-pws-handler", handler)
-	resp, err := httpClient.Do(req)
+	if account {
+		req.Header.Set("User-Agent", "Mozilla/5.0 (X11; Linux x86_64; rv:145.0) Gecko/20100101 Firefox/145.0")
+		req.Header.Set("Cookie", "_pinterest_sess="+pinterestSession+"; csrftoken="+pinterestCSRF)
+		req.Header.Set("x-csrftoken", pinterestCSRF)
+		if h := accountHost.Load(); h != nil {
+			req.URL.Scheme, req.URL.Host, req.Host = h.Scheme, h.Host, h.Host
+		}
+	}
+	client := httpClient
+	if account {
+		client = accountClient
+	}
+	resp, err := client.Do(req)
+	if account && err == nil && resp.StatusCode >= 300 && resp.StatusCode < 400 {
+		loc, lerr := resp.Location()
+		resp.Body.Close()
+		if lerr != nil || loc.Path != req.URL.Path || !isPinterestHost(loc.Hostname()) {
+			log.Printf("pinterest %s: unexpected redirect with the account", what)
+			renderErrorPage(w, r, http.StatusBadGateway, "Pinterest sent a response Pinata couldn't read.")
+			return nil, "", false
+		}
+		accountHost.Store(&url.URL{Scheme: loc.Scheme, Host: loc.Host})
+		req2 := req.Clone(r.Context())
+		req2.URL, req2.Host = loc, loc.Host
+		resp, err = client.Do(req2)
+	}
 	if err != nil {
 		renderFetchError(w, r, what, err)
 		return nil, "", false
@@ -1394,11 +1489,18 @@ func pinterestResource(w http.ResponseWriter, r *http.Request, what, resource, h
 			Data     json.RawMessage `json:"data"`
 			Bookmark string          `json:"bookmark"`
 		} `json:"resource_response"`
+		ClientContext struct {
+			IsAuthenticated *bool `json:"is_authenticated"`
+		} `json:"client_context"`
 	}
 	if err := json.NewDecoder(io.LimitReader(resp.Body, 16<<20)).Decode(&body); err != nil {
 		log.Printf("pinterest %s: unreadable response (decode error: %v)", what, err)
 		renderErrorPage(w, r, http.StatusBadGateway, "Pinterest sent a response Pinata couldn't read.")
 		return nil, "", false
+	}
+	loggedOut := account && body.ClientContext.IsAuthenticated != nil && !*body.ClientContext.IsAuthenticated
+	if loggedOut {
+		accountFailed() // this answer is a logged-out one: shown, not cached
 	}
 	d, bm := body.ResourceResponse.Data, body.ResourceResponse.Bookmark
 	if bm == "-end-" {
@@ -1411,7 +1513,7 @@ func pinterestResource(w http.ResponseWriter, r *http.Request, what, resource, h
 		}
 		return json.RawMessage("[]"), "", true
 	}
-	if string(d) != "[]" {
+	if string(d) != "[]" && !loggedOut {
 		apiCache.put(cacheKey, map[string]string{"bookmark": bm}, d)
 	}
 	return d, bm, true
@@ -1478,7 +1580,7 @@ func profilePage(w http.ResponseWriter, r *http.Request, user string) {
 		bookmark = ""
 	}
 	raw, _, ok := pinterestResource(w, r, "profile", "UserResource", "www/[username].js",
-		map[string]any{"username": user, "field_set_key": "profile"}, "user\x00"+user, "This profile doesn't exist.")
+		map[string]any{"username": user, "field_set_key": "profile"}, "user\x00"+user, "This profile doesn't exist.", false)
 	if !ok {
 		return
 	}
@@ -1491,7 +1593,7 @@ func profilePage(w http.ResponseWriter, r *http.Request, user string) {
 	if bookmark != "" {
 		opts["bookmarks"] = []string{bookmark}
 	}
-	raw, next, ok := pinterestResource(w, r, "boards", "BoardsResource", "www/[username].js", opts, "boards\x00"+user+"\x00"+bookmark, "")
+	raw, next, ok := pinterestResource(w, r, "boards", "BoardsResource", "www/[username].js", opts, "boards\x00"+user+"\x00"+bookmark, "", false)
 	if !ok {
 		return
 	}
@@ -1543,7 +1645,7 @@ func profilePage(w http.ResponseWriter, r *http.Request, user string) {
 // boardPage shows a board and the pins Pinterest serves of it.
 func boardPage(w http.ResponseWriter, r *http.Request, user, slug string) {
 	raw, _, ok := pinterestResource(w, r, "board", "BoardResource", "www/[username]/[slug].js",
-		map[string]any{"username": user, "slug": slug, "field_set_key": "detailed"}, "board\x00"+user+"\x00"+slug, "This board doesn't exist or is private.")
+		map[string]any{"username": user, "slug": slug, "field_set_key": "detailed"}, "board\x00"+user+"\x00"+slug, "This board doesn't exist or is private.", false)
 	if !ok {
 		return
 	}
@@ -1556,8 +1658,25 @@ func boardPage(w http.ResponseWriter, r *http.Request, user, slug string) {
 	if !isBoardPath(boardURL) {
 		boardURL = "/" + user + "/" + url.PathEscape(slug) + "/"
 	}
-	raw, _, ok = pinterestResource(w, r, "board pins", "BoardFeedResource", "www/[username]/[slug].js",
-		map[string]any{"board_id": bd.ID, "board_url": boardURL, "field_set_key": "react_grid_pin", "page_size": boardPageSize}, "boardfeed\x00"+bd.ID, "")
+	bookmark := r.URL.Query().Get("bookmark")
+	if len(bookmark) > 2048 {
+		bookmark = ""
+	}
+	before, _ := strconv.Atoi(r.URL.Query().Get("n")) // pins on earlier pages
+	if bookmark == "" || before < 0 || before > 1000000 {
+		before = 0
+	}
+	account := accountOn()
+	opts := map[string]any{"board_id": bd.ID, "board_url": boardURL, "field_set_key": "react_grid_pin", "page_size": boardPageSize}
+	if bookmark != "" {
+		opts["bookmarks"] = []string{bookmark}
+	}
+	mode := "out"
+	if account {
+		mode = "login"
+	}
+	raw, next, ok := pinterestResource(w, r, "board pins", "BoardFeedResource", "www/[username]/[slug].js", opts,
+		"boardfeed\x00"+bd.ID+"\x00"+bookmark+"\x00"+mode, "", account)
 	if !ok {
 		return
 	}
@@ -1592,11 +1711,18 @@ func boardPage(w http.ResponseWriter, r *http.Request, user, slug string) {
 		_, _ = io.WriteString(w, renderCardHTML(st, &res, cardHref(&res), thumbMobile, thumbDesktop, thumbHigh))
 	}
 	_, _ = io.WriteString(w, `</div>`)
-	if shown == 0 {
-		_, _ = io.WriteString(w, `<p style="color:var(--muted);">This board has no pins Pinterest shows without an account.</p>`)
+	without := ""
+	if !account || !accountOn() { // the account may have just failed
+		without = " without an account"
 	}
-	if shown > 0 && shown < bd.PinCount {
-		note := `Pinterest shows ` + formatCount(shown) + ` of this board's ` + formatCount(bd.PinCount) + ` pins without an account.`
+	total := before + shown
+	switch {
+	case next != "":
+		_, _ = io.WriteString(w, `<div class="pagination"><a href="`+html.EscapeString(boardURL+"?bookmark="+url.QueryEscape(next)+"&n="+strconv.Itoa(total))+`">Next page</a></div>`)
+	case total == 0:
+		_, _ = io.WriteString(w, `<p style="color:var(--muted);">This board has no pins Pinterest shows`+without+`.</p>`)
+	case total < bd.PinCount:
+		note := `Pinterest shows ` + formatCount(total) + ` of this board's ` + formatCount(bd.PinCount) + ` pins` + without + `.`
 		if q := slugWords(slug); q != "" && utf8.RuneCountInString(q) <= maxQueryRunes {
 			note += ` <a href="/search?q=` + url.QueryEscape(q) + `">Search for "` + html.EscapeString(q) + `"</a> to see more like them.`
 		}
