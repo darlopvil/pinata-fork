@@ -2121,6 +2121,7 @@ type pinView struct {
 	Video      string // video path under videoCDN, when known
 	Color      string // dominant color, for the placeholder
 	Link       string // this pin page's link, for bookmarks
+	Related    string // the "More like this" section, already rendered
 }
 
 // isOpaquePinID reports whether s looks like the opaque IDs ("e1_...") that
@@ -2279,6 +2280,9 @@ func pinHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func pinFromPinterest(w http.ResponseWriter, r *http.Request, id string) {
+	// Related pins load alongside the pin, so they add no wait.
+	related := make(chan string, 1)
+	go func() { related <- relatedSection(r, id) }()
 	cacheKey := "pin\x00" + id
 	if e, ok := apiCache.open(cacheKey, pinTTL); ok {
 		var p pinData
@@ -2286,7 +2290,7 @@ func pinFromPinterest(w http.ResponseWriter, r *http.Request, id string) {
 		e.Close()
 		if err == nil {
 			w.Header().Set("X-Pinata-Cache", "hit")
-			renderPinData(w, r, id, &p)
+			renderPinData(w, r, id, &p, related)
 			return
 		}
 	}
@@ -2324,7 +2328,7 @@ func pinFromPinterest(w http.ResponseWriter, r *http.Request, id string) {
 		return
 	}
 	p := body.ResourceResponse.Data
-	if renderPinData(w, r, id, p) {
+	if renderPinData(w, r, id, p, related) {
 		if b, err := json.Marshal(p); err == nil {
 			apiCache.put(cacheKey, nil, b)
 		}
@@ -2333,7 +2337,7 @@ func pinFromPinterest(w http.ResponseWriter, r *http.Request, id string) {
 
 // renderPinData renders a pin page from PinResource data and reports whether
 // the pin could be shown.
-func renderPinData(w http.ResponseWriter, r *http.Request, id string, p *pinData) bool {
+func renderPinData(w http.ResponseWriter, r *http.Request, id string, p *pinData, related <-chan string) bool {
 	orig := fullImage(p.Images["orig"], p.Images["736x"])
 	if !isPinimgURL(orig.URL) {
 		renderErrorPage(w, r, http.StatusBadGateway, "This pin has no image Pinata can show.")
@@ -2360,8 +2364,135 @@ func renderPinData(w http.ResponseWriter, r *http.Request, id string, p *pinData
 	if p.Aggregated != nil {
 		v.Saves = p.Aggregated.Stats.Saves
 	}
+	v.Related = <-related
 	renderPinPage(w, r, v)
 	return true
+}
+
+// ---------- related pins ----------
+// RelatedPinFeedResource answers logged out, 25 pins a page with a bookmark
+// for the next, but only for numeric pin IDs: for the opaque IDs of search
+// results it answers "Pin not found", with an account too. So only pins
+// opened by their Pinterest ID (Pinterest links, short links) get related
+// pins. The newer RelatedModulesResource needs an account.
+
+// relatedPins fetches a page of the pins Pinterest relates to pin id. It
+// never renders anything: the pin page shows without them on failure.
+func relatedPins(ctx context.Context, id, bookmark string) ([]json.RawMessage, string, bool) {
+	cacheKey := "related\x00" + id + "\x00" + bookmark
+	var items []json.RawMessage
+	if e, ok := apiCache.open(cacheKey, searchTTL); ok {
+		err := json.NewDecoder(e.Body).Decode(&items)
+		bm := e.Meta["bookmark"]
+		e.Close()
+		if err == nil {
+			return items, bm, true
+		}
+	}
+	opts := map[string]any{"pin": id, "add_vase": true, "show_seo_canonical_pins": true, "source": "unknown", "top_level_source": "unknown", "page_size": 25}
+	if bookmark != "" {
+		opts["bookmarks"] = []string{bookmark}
+	}
+	data, _ := json.Marshal(map[string]any{"options": opts, "context": map[string]any{}})
+	req, err := http.NewRequestWithContext(ctx, "GET", pinterestResourceBase+"RelatedPinFeedResource/get/?data="+url.QueryEscape(string(data)), nil)
+	if err != nil {
+		return nil, "", false
+	}
+	req.Header.Set("x-pinterest-pws-handler", "www/pin/[id].js")
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		var uerr *url.Error
+		if errors.As(err, &uerr) {
+			err = uerr.Err
+		}
+		log.Printf("pinterest related pins: request failed: %v", err)
+		return nil, "", false
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode > 299 {
+		log.Printf("pinterest related pins: upstream status %d", resp.StatusCode)
+		return nil, "", false
+	}
+	var body struct {
+		ResourceResponse struct {
+			Data     []json.RawMessage `json:"data"`
+			Bookmark string            `json:"bookmark"`
+		} `json:"resource_response"`
+	}
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 8<<20)).Decode(&body); err != nil {
+		log.Printf("pinterest related pins: unreadable response (decode error: %v)", err)
+		return nil, "", false
+	}
+	bm := body.ResourceResponse.Bookmark
+	if bm == "-end-" {
+		bm = ""
+	}
+	if b, err := json.Marshal(body.ResourceResponse.Data); err == nil && len(body.ResourceResponse.Data) > 0 {
+		apiCache.put(cacheKey, map[string]string{"bookmark": bm}, b)
+	}
+	return body.ResourceResponse.Data, bm, true
+}
+
+// relatedCards renders related pins as cards and counts them.
+func relatedCards(r *http.Request, items []json.RawMessage) (string, int) {
+	_, imgScale := getThemeVars(r)
+	thumbMobile, thumbDesktop, thumbHigh := thumbWidths(imgScale)
+	st := newPageState(r)
+	var b strings.Builder
+	shown := 0
+	for _, it := range items {
+		var res searchResult
+		if json.Unmarshal(it, &res) != nil || strings.TrimSpace(res.Images.Orig.URL) == "" {
+			continue // "story" blocks have no image
+		}
+		shown++
+		b.WriteString(renderCardHTML(st, &res, cardHref(&res), thumbMobile, thumbDesktop, thumbHigh))
+	}
+	return b.String(), shown
+}
+
+func relatedNextLink(id, bm string) string {
+	if bm == "" || len(bm) > 2000 {
+		return ""
+	}
+	return `<div class="pagination"><a href="/pin/` + id + `/related/?bookmark=` + html.EscapeString(url.QueryEscape(bm)) + `">Next page</a></div>`
+}
+
+// relatedSection is the "More like this" section of a pin page, or "".
+func relatedSection(r *http.Request, id string) string {
+	items, bm, ok := relatedPins(r.Context(), id, "")
+	if !ok {
+		return ""
+	}
+	cards, shown := relatedCards(r, items)
+	if shown == 0 {
+		return ""
+	}
+	return `<h2 style="margin:32px 0 0 0;">More like this</h2><div class="img-container">` + cards + `</div>` + relatedNextLink(id, bm)
+}
+
+// relatedHandler serves /pin/{id}/related/, the next pages of related pins.
+func relatedHandler(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	bm := r.URL.Query().Get("bookmark")
+	if !isPinID(id) || len(bm) > 2000 {
+		renderErrorPage(w, r, http.StatusNotFound, "There's nothing at this address.")
+		return
+	}
+	items, next, ok := relatedPins(r.Context(), id, bm)
+	if !ok {
+		renderErrorPage(w, r, http.StatusBadGateway, "Pinterest didn't send more pins like this one. Try again in a moment.")
+		return
+	}
+	cards, shown := relatedCards(r, items)
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	_, _ = io.WriteString(w, pageHead(r, "More like this - Pinata"))
+	_, _ = io.WriteString(w, headerWithSearch(r))
+	_, _ = io.WriteString(w, `<h2 style="margin:4px 0 0 0;">More like <a href="/pin/`+id+`">this pin</a></h2><div class="img-container">`+cards+`</div>`)
+	if shown == 0 {
+		_, _ = io.WriteString(w, `<p style="color:var(--muted);">Pinterest has no more pins like this one.</p>`)
+	}
+	_, _ = io.WriteString(w, relatedNextLink(id, next)+footerHTML)
 }
 
 func renderPinPage(w http.ResponseWriter, r *http.Request, v pinView) {
@@ -2465,7 +2596,7 @@ func renderPinPage(w http.ResponseWriter, r *http.Request, v pinView) {
 		b.WriteString(pinSaveFrame(newPageState(r), v.Link, v.Orig))
 	}
 	b.WriteString(`<a class="btn-save" href="` + html.EscapeString(full) + `" target="_blank" rel="noreferrer" style="text-decoration:none;">Full size</a>`)
-	b.WriteString(`</div></div></div>` + footerHTML)
+	b.WriteString(`</div></div></div>` + v.Related + footerHTML)
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	if usesJS {
@@ -3349,6 +3480,7 @@ func main() {
 	mux.HandleFunc("GET /pin/{id}", pinHandler)
 	// Pinterest's pin URLs can go on after the ID (/pin/<id>/sent/).
 	mux.HandleFunc("GET /pin/{id}/{rest...}", pinHandler)
+	mux.HandleFunc("GET /pin/{id}/related/{$}", relatedHandler)
 	mux.HandleFunc("GET /pin.it/{code}", shortLinkHandler)
 	mux.HandleFunc("GET /search/{$}", pinterestSearchHandler)
 	mux.HandleFunc("GET /search/{scope}/{$}", pinterestSearchHandler)
