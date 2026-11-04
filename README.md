@@ -104,7 +104,7 @@ What it costs: the boards opened through the instance are tied to that account, 
 
 ## Privacy
 
-Pinterest only talks to the server running Pinata. That server does see the searches and pins requested through it, like any proxy: use an instance you trust, or host your own. Pinata doesn't log requests (only startup messages, failures talking to Pinterest and cache hit counts); bookmarks are encrypted with the instance's key and kept in your browser. Without the disk cache it writes nothing to disk. With it, the server keeps images it has served, and for a short while the search pages and pins it fetched; file names are hashes, so they don't show what was searched, but the cached pages themselves contain the results.
+Pinterest only talks to the server running Pinata. That server does see the searches and pins requested through it, like any proxy: use an instance you trust, or host your own. Pinata doesn't log requests (only startup messages, failures talking to Pinterest and cache hit counts); bookmarks are encrypted with the instance's key and kept in your browser. Without the disk cache it writes nothing to disk. With it, the server keeps images it has served, and for a short while the search pages and pins it fetched; file names are hashes, so they don't show what was searched, but the cached pages themselves contain the results. The instance also asks crawlers to stay away (`robots.txt`): every page they followed would be a request to Pinterest, counting toward the rate limit that blocks the instance for everyone.
 
 ## License
 

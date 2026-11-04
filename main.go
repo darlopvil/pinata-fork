@@ -907,6 +907,15 @@ const footerHTML = `<div class="footer-note">Pinata fork by darlopvil, based on 
 // faviconSVG is Pinata's icon, a star piñata.
 const faviconSVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><path fill="#f59e0b" d="M26.7 20.1 L32.0 2.0 L37.3 20.1 Z"/><path fill="#ec4899" d="M38.0 20.5 L55.5 13.3 L44.6 28.7 Z"/><path fill="#22c55e" d="M44.8 29.5 L61.2 38.7 L42.4 39.8 Z"/><path fill="#06b6d4" d="M41.9 40.4 L45.0 59.0 L32.4 45.0 Z"/><path fill="#f59e0b" d="M31.6 45.0 L19.0 59.0 L22.1 40.4 Z"/><path fill="#ec4899" d="M21.6 39.8 L2.8 38.7 L19.2 29.5 Z"/><path fill="#22c55e" d="M19.4 28.7 L8.5 13.3 L26.0 20.5 Z"/><circle cx="32" cy="32" r="15" fill="#7c3aed"/><path d="M19 29h26M19 35h26" stroke="#f1f5f9" stroke-width="3" stroke-linecap="round"/></svg>`
 
+// robotsHandler asks crawlers to stay off the instance: every page they
+// followed would be a request to Pinterest, counting toward the rate limit
+// that blocks the instance for everyone.
+func robotsHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	w.Header().Set("Cache-Control", "public, max-age=86400")
+	_, _ = io.WriteString(w, "User-agent: *\nDisallow: /\n")
+}
+
 func faviconHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "image/svg+xml")
 	w.Header().Set("Cache-Control", "public, max-age=604800")
@@ -3599,6 +3608,7 @@ func main() {
 	mux.HandleFunc("GET /favicon.ico", func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/favicon.svg", http.StatusMovedPermanently)
 	})
+	mux.HandleFunc("GET /robots.txt", robotsHandler)
 	mux.HandleFunc("GET /settings", settingsPageHandler)
 	mux.HandleFunc("POST /settings", settingsPostHandler)
 	mux.HandleFunc("GET /{$}", indexHandler)
