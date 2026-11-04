@@ -24,7 +24,7 @@ This is darlopvil's fork of [Pinata by gigirassy](https://codeberg.org/gigirassy
 - **Reverse image search** with Yandex (default), Google Lens, Bing, SauceNAO or TinEye, instead of TinEye only.
 - **Video pins play** on their pin page, through the instance, with nothing downloaded until you press play and nothing playing by itself. Search results only mark them with a ▶ badge, so they stay as fast as before. Regular video pins play as MP4 with no JavaScript; idea pins only exist as HLS with separate audio, so they play through hls.js (see below).
 - **Animated GIFs** in search results, or still images if you prefer (Animate GIFs: never).
-- **Downloaded images are named after the pin**, instead of `image_proxy`.
+- **Downloaded images are named after the pin**, instead of `image_proxy`, and pin pages have a **Download** button next to "Full size".
 - **Lighter thumbnails**, resized from Pinterest's own JPEG variants instead of the full originals: on 10 test results, 148 KB instead of 20.1 MB with GIFs shown still.
 - **Optional disk cache**: images are kept until a size cap, search pages, profiles and boards for 15 minutes and pins for an hour, so reloads, going back and other devices don't ask Pinterest again.
 - **Image placeholders**: real alt text and each pin's dominant color while images load.

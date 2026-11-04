@@ -2924,6 +2924,9 @@ func renderPinPage(w http.ResponseWriter, r *http.Request, v pinView) {
 		b.WriteString(pinSaveFrame(newPageState(r), v.Link, v.Orig))
 	}
 	b.WriteString(`<a class="btn-save" href="` + html.EscapeString(full) + `" target="_blank" rel="noreferrer" style="text-decoration:none;">Full size</a>`)
+	// Same image, saved instead of opened. It's served by the instance, so
+	// the download attribute works, and the file is named after the pin.
+	b.WriteString(`<a class="btn-save" href="` + html.EscapeString(full) + `" download style="text-decoration:none;">Download</a>`)
 	b.WriteString(`</div></div></div>` + v.Related + footerHTML)
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
