@@ -44,7 +44,7 @@ import (
 
 var httpClient = &http.Client{
 	Timeout: 15 * time.Second,
-	Transport: &http.Transport{
+	Transport: pinterestStatus{&http.Transport{
 		Proxy: http.ProxyFromEnvironment,
 
 		DialContext: (&net.Dialer{
@@ -56,7 +56,7 @@ var httpClient = &http.Client{
 		MaxIdleConnsPerHost: 3,
 		IdleConnTimeout:     60 * time.Second,
 		TLSHandshakeTimeout: 8 * time.Second,
-	},
+	}},
 }
 
 var copyBufPool = sync.Pool{
@@ -1014,6 +1014,47 @@ const footerHTML = `<div class="footer-note">Pinata fork by darlopvil, based on 
 
 // faviconSVG is Pinata's icon, a star piñata.
 const faviconSVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><path fill="#f59e0b" d="M26.7 20.1 L32.0 2.0 L37.3 20.1 Z"/><path fill="#ec4899" d="M38.0 20.5 L55.5 13.3 L44.6 28.7 Z"/><path fill="#22c55e" d="M44.8 29.5 L61.2 38.7 L42.4 39.8 Z"/><path fill="#06b6d4" d="M41.9 40.4 L45.0 59.0 L32.4 45.0 Z"/><path fill="#f59e0b" d="M31.6 45.0 L19.0 59.0 L22.1 40.4 Z"/><path fill="#ec4899" d="M21.6 39.8 L2.8 38.7 L19.2 29.5 Z"/><path fill="#22c55e" d="M19.4 28.7 L8.5 13.3 L26.0 20.5 Z"/><circle cx="32" cy="32" r="15" fill="#7c3aed"/><path d="M19 29h26M19 35h26" stroke="#f1f5f9" stroke-width="3" stroke-linecap="round"/></svg>`
+
+// ---------- health ----------
+// /healthz says, without asking Pinterest anything, whether the instance is
+// up, whether its optional account still logs in, and whether Pinterest's
+// latest answer was a rate limit (429), for uptime monitors. Every request
+// to Pinterest goes through pinterestStatus, which keeps that last answer.
+
+var pinterestLimited atomic.Bool
+
+// pinterestStatus records whether Pinterest's latest answer was a 429.
+type pinterestStatus struct{ http.RoundTripper }
+
+func (t pinterestStatus) RoundTrip(req *http.Request) (*http.Response, error) {
+	resp, err := t.RoundTripper.RoundTrip(req)
+	if err == nil && isPinterestHost(req.URL.Hostname()) {
+		switch {
+		case resp.StatusCode == http.StatusTooManyRequests:
+			pinterestLimited.Store(true)
+		case resp.StatusCode < 500:
+			pinterestLimited.Store(false)
+		}
+	}
+	return resp, err
+}
+
+func healthHandler(w http.ResponseWriter, r *http.Request) {
+	account := "none"
+	if pinterestSession != "" {
+		account = "off" // given, but no longer logs in
+		if accountOn() {
+			account = "on"
+		}
+	}
+	pinterest := "ok"
+	if pinterestLimited.Load() {
+		pinterest = "rate-limited"
+	}
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
+	_, _ = fmt.Fprintf(w, "pinata: ok\naccount: %s\npinterest: %s\n", account, pinterest)
+}
 
 // robotsHandler asks crawlers to stay off the instance: every page they
 // followed would be a request to Pinterest, counting toward the rate limit
@@ -3805,6 +3846,7 @@ func main() {
 		http.Redirect(w, r, "/favicon.svg", http.StatusMovedPermanently)
 	})
 	mux.HandleFunc("GET /robots.txt", robotsHandler)
+	mux.HandleFunc("GET /healthz", healthHandler)
 	mux.HandleFunc("GET /settings", settingsPageHandler)
 	mux.HandleFunc("POST /settings", settingsPostHandler)
 	mux.HandleFunc("GET /{$}", indexHandler)

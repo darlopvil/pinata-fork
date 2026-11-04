@@ -82,6 +82,19 @@ Requires Go 1.26 or newer. Pinata listens on port 8080.
 | `PINATA_CACHE_API_MB` | Size cap of the cache of search pages, profiles, boards and pins, in MB (default 64). |
 | `PINATA_PINTEREST_SESSION`, `PINATA_PINTEREST_CSRF` | The `_pinterest_sess` and `csrftoken` cookies of an optional throwaway account, used for board pages only (see Pinterest account). Empty: no account. |
 
+### Monitoring
+
+`/healthz` answers in plain text, without asking Pinterest anything:
+
+```
+pinata: ok
+account: on
+pinterest: ok
+```
+
+- `account`: `none` without an account; `on` while it logs in; `off` once Pinterest stopped taking it (set new cookies and restart).
+- `pinterest`: `rate-limited` when Pinterest's latest answer to the instance was a 429, `ok` again as soon as it answers normally. It reflects real traffic, so a monitor that also opens a search now and then keeps it current.
+
 ### Behind a reverse proxy
 
 - Pass `X-Forwarded-Proto: https`, so cookies get the `Secure` flag. Nginx Proxy Manager and most proxies do this by default.
