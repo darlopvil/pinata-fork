@@ -1570,6 +1570,10 @@ func profileHandler(w http.ResponseWriter, r *http.Request) {
 		renderErrorPage(w, r, http.StatusNotFound, "There's nothing at this address.")
 		return
 	}
+	if bm := r.URL.Query().Get("bookmark"); board == "_saved" && bm != "" && len(bm) <= 2048 {
+		profilePinsPage(w, r, user, bm)
+		return
+	}
 	if strings.HasPrefix(board, "_") {
 		http.Redirect(w, r, "/"+user+"/", http.StatusFound)
 		return
@@ -1586,6 +1590,12 @@ func profilePage(w http.ResponseWriter, r *http.Request, user string) {
 	bookmark := r.URL.Query().Get("bookmark")
 	if len(bookmark) > 2048 {
 		bookmark = ""
+	}
+	// The profile's pins load alongside it, on its first page.
+	var pinsSection chan string
+	if bookmark == "" {
+		pinsSection = make(chan string, 1)
+		go func() { pinsSection <- profilePinsSection(r, user) }()
 	}
 	raw, _, ok := pinterestResource(w, r, "profile", "UserResource", "www/[username].js",
 		map[string]any{"username": user, "field_set_key": "profile"}, "user\x00"+user, "This profile doesn't exist.", false)
@@ -1621,8 +1631,12 @@ func profilePage(w http.ResponseWriter, r *http.Request, user string) {
 		b.WriteString(`<p class="pin-desc">` + html.EscapeString(about) + `</p>`)
 	}
 	b.WriteString(`</div></div>`)
-	if len(boards) == 0 {
-		b.WriteString(`<p style="color:var(--muted);">No public boards.</p>`)
+	pins := ""
+	if pinsSection != nil {
+		pins = <-pinsSection
+	}
+	if len(boards) == 0 && pins == "" {
+		b.WriteString(`<p style="color:var(--muted);">No public boards or pins.</p>`)
 	}
 	b.WriteString(`<div class="board-grid">`)
 	for _, bd := range boards {
@@ -1645,9 +1659,48 @@ func profilePage(w http.ResponseWriter, r *http.Request, user string) {
 	if next != "" {
 		b.WriteString(`<div class="pagination"><a href="/` + html.EscapeString(user) + `/?bookmark=` + html.EscapeString(url.QueryEscape(next)) + `">Next page</a></div>`)
 	}
-	b.WriteString(footerHTML)
+	b.WriteString(pins + footerHTML)
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	_, _ = io.WriteString(w, b.String())
+}
+
+// profilePinsSection is the "Pins" section of a profile's first page, or "".
+func profilePinsSection(r *http.Request, user string) string {
+	items, bm, ok := userPins(r.Context(), user, "")
+	if !ok {
+		return ""
+	}
+	cards, shown := feedCards(r, items)
+	if shown == 0 {
+		return ""
+	}
+	return `<h2 style="margin:32px 0 0 0;">Pins</h2><div class="img-container">` + cards + `</div>` + profilePinsNext(user, bm)
+}
+
+func profilePinsNext(user, bm string) string {
+	if bm == "" || len(bm) > 2048 {
+		return ""
+	}
+	return `<div class="pagination"><a href="/` + user + `/_saved/?bookmark=` + html.EscapeString(url.QueryEscape(bm)) + `">Next page</a></div>`
+}
+
+// profilePinsPage serves /<user>/_saved/?bookmark=..., the next pages of a
+// profile's pins.
+func profilePinsPage(w http.ResponseWriter, r *http.Request, user, bookmark string) {
+	items, next, ok := userPins(r.Context(), user, bookmark)
+	if !ok {
+		renderErrorPage(w, r, http.StatusBadGateway, "Pinterest didn't send more of this profile's pins. Try again in a moment.")
+		return
+	}
+	cards, shown := feedCards(r, items)
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	_, _ = io.WriteString(w, pageHead(r, "@"+user+"'s pins - Pinata"))
+	_, _ = io.WriteString(w, headerWithSearch(r))
+	_, _ = io.WriteString(w, `<h2 style="margin:4px 0 0 0;">Pins saved by <a href="/`+user+`/">@`+user+`</a></h2><div class="img-container">`+cards+`</div>`)
+	if shown == 0 {
+		_, _ = io.WriteString(w, `<p style="color:var(--muted);">Pinterest has no more of this profile's pins.</p>`)
+	}
+	_, _ = io.WriteString(w, profilePinsNext(user, next)+footerHTML)
 }
 
 // boardPage shows a board and the pins Pinterest serves of it.
@@ -2510,10 +2563,30 @@ func renderPinData(w http.ResponseWriter, r *http.Request, id string, p *pinData
 // opened by their Pinterest ID (Pinterest links, short links) get related
 // pins. The newer RelatedModulesResource needs an account.
 
-// relatedPins fetches a page of the pins Pinterest relates to pin id. It
-// never renders anything: the pin page shows without them on failure.
+// relatedPins fetches a page of the pins Pinterest relates to pin id.
 func relatedPins(ctx context.Context, id, bookmark string) ([]json.RawMessage, string, bool) {
-	cacheKey := "related\x00" + id + "\x00" + bookmark
+	opts := map[string]any{"pin": id, "add_vase": true, "show_seo_canonical_pins": true, "source": "unknown", "top_level_source": "unknown", "page_size": 25}
+	if bookmark != "" {
+		opts["bookmarks"] = []string{bookmark}
+	}
+	return fetchFeed(ctx, "related pins", "RelatedPinFeedResource", "www/pin/[id].js", opts, "related\x00"+id+"\x00"+bookmark)
+}
+
+// userPins fetches a page of a profile's pins, those saved outside boards
+// ("Quick saves") included. Measured: UserPinsResource answers logged out,
+// about 22 pins a page with numeric IDs and a bookmark for the next; a
+// profile whose pins are all quick saves lists no boards at all.
+func userPins(ctx context.Context, user, bookmark string) ([]json.RawMessage, string, bool) {
+	opts := map[string]any{"username": user, "field_set_key": "grid_item", "page_size": 25}
+	if bookmark != "" {
+		opts["bookmarks"] = []string{bookmark}
+	}
+	return fetchFeed(ctx, "profile pins", "UserPinsResource", "www/[username].js", opts, "userpins\x00"+user+"\x00"+bookmark)
+}
+
+// fetchFeed fetches a page of a Pinterest feed, logged out. It never renders
+// anything: pages show without the feed on failure.
+func fetchFeed(ctx context.Context, what, resource, handler string, opts map[string]any, cacheKey string) ([]json.RawMessage, string, bool) {
 	var items []json.RawMessage
 	if e, ok := apiCache.open(cacheKey, searchTTL); ok {
 		err := json.NewDecoder(e.Body).Decode(&items)
@@ -2523,28 +2596,24 @@ func relatedPins(ctx context.Context, id, bookmark string) ([]json.RawMessage, s
 			return items, bm, true
 		}
 	}
-	opts := map[string]any{"pin": id, "add_vase": true, "show_seo_canonical_pins": true, "source": "unknown", "top_level_source": "unknown", "page_size": 25}
-	if bookmark != "" {
-		opts["bookmarks"] = []string{bookmark}
-	}
 	data, _ := json.Marshal(map[string]any{"options": opts, "context": map[string]any{}})
-	req, err := http.NewRequestWithContext(ctx, "GET", pinterestResourceBase+"RelatedPinFeedResource/get/?data="+url.QueryEscape(string(data)), nil)
+	req, err := http.NewRequestWithContext(ctx, "GET", pinterestResourceBase+resource+"/get/?data="+url.QueryEscape(string(data)), nil)
 	if err != nil {
 		return nil, "", false
 	}
-	req.Header.Set("x-pinterest-pws-handler", "www/pin/[id].js")
+	req.Header.Set("x-pinterest-pws-handler", handler)
 	resp, err := httpClient.Do(req)
 	if err != nil {
 		var uerr *url.Error
 		if errors.As(err, &uerr) {
 			err = uerr.Err
 		}
-		log.Printf("pinterest related pins: request failed: %v", err)
+		log.Printf("pinterest %s: request failed: %v", what, err)
 		return nil, "", false
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
-		log.Printf("pinterest related pins: upstream status %d", resp.StatusCode)
+		log.Printf("pinterest %s: upstream status %d", what, resp.StatusCode)
 		return nil, "", false
 	}
 	var body struct {
@@ -2554,7 +2623,7 @@ func relatedPins(ctx context.Context, id, bookmark string) ([]json.RawMessage, s
 		} `json:"resource_response"`
 	}
 	if err := json.NewDecoder(io.LimitReader(resp.Body, 8<<20)).Decode(&body); err != nil {
-		log.Printf("pinterest related pins: unreadable response (decode error: %v)", err)
+		log.Printf("pinterest %s: unreadable response (decode error: %v)", what, err)
 		return nil, "", false
 	}
 	bm := body.ResourceResponse.Bookmark
@@ -2567,8 +2636,8 @@ func relatedPins(ctx context.Context, id, bookmark string) ([]json.RawMessage, s
 	return body.ResourceResponse.Data, bm, true
 }
 
-// relatedCards renders related pins as cards and counts them.
-func relatedCards(r *http.Request, items []json.RawMessage) (string, int) {
+// feedCards renders a feed's pins as cards and counts them.
+func feedCards(r *http.Request, items []json.RawMessage) (string, int) {
 	_, imgScale := getThemeVars(r)
 	thumbMobile, thumbDesktop, thumbHigh := thumbWidths(imgScale)
 	st := newPageState(r)
@@ -2598,7 +2667,7 @@ func relatedSection(r *http.Request, id string) string {
 	if !ok {
 		return ""
 	}
-	cards, shown := relatedCards(r, items)
+	cards, shown := feedCards(r, items)
 	if shown == 0 {
 		return ""
 	}
@@ -2618,7 +2687,7 @@ func relatedHandler(w http.ResponseWriter, r *http.Request) {
 		renderErrorPage(w, r, http.StatusBadGateway, "Pinterest didn't send more pins like this one. Try again in a moment.")
 		return
 	}
-	cards, shown := relatedCards(r, items)
+	cards, shown := feedCards(r, items)
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	_, _ = io.WriteString(w, pageHead(r, "More like this - Pinata"))
 	_, _ = io.WriteString(w, headerWithSearch(r))
