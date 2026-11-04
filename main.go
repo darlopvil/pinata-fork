@@ -19,9 +19,8 @@ import (
 	"html"
 	"image"
 	_ "image/gif"
-	_ "image/jpeg"
-	_ "image/png"
 	"image/jpeg"
+	_ "image/png"
 	"io"
 	"io/fs"
 	"log"
@@ -3648,7 +3647,7 @@ func main() {
 		ReadTimeout:  12 * time.Second,
 		WriteTimeout: 30 * time.Second,
 		IdleTimeout:  60 * time.Second,
-		BaseContext: func(net.Listener) context.Context { return context.Background() },
+		BaseContext:  func(net.Listener) context.Context { return context.Background() },
 	}
 
 	log.Println("Pinata listening on :8080 (no-JS mode). Bookmarking enabled:", bookmarkingEnabled, " Reverse disabled:", disableReverse)
