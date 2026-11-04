@@ -724,6 +724,115 @@ func isHTTPS(r *http.Request) bool {
 	return r.TLS != nil || strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https")
 }
 
+// ---------- RSS feeds ----------
+// Searches and boards have an RSS 2.0 feed at their own address plus
+// ?format=rss: the first page of results, as the page shows it. Feeds are
+// served from the same cache as the pages (15 minutes) and ask readers to
+// check hourly, so a followed search costs Pinterest at most a few requests
+// an hour. Entries link to the instance's pin pages; their guid is the pin's
+// image address, which doesn't change between requests.
+
+func wantsFeed(r *http.Request) bool { return r.URL.Query().Get("format") == "rss" }
+
+// instanceBase is the instance's own scheme and host, for absolute links.
+func instanceBase(r *http.Request) string {
+	scheme := "http"
+	if isHTTPS(r) {
+		scheme = "https"
+	}
+	host := r.Host
+	for _, c := range host {
+		if !(c == '.' || c == '-' || c == ':' || c == '[' || c == ']' || c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9') {
+			host = ""
+			break
+		}
+	}
+	if host == "" {
+		host = "localhost"
+	}
+	return scheme + "://" + host
+}
+
+// xmlText escapes s for XML, dropping characters XML 1.0 doesn't allow.
+func xmlText(s string) string {
+	return html.EscapeString(strings.Map(func(c rune) rune {
+		if c == '\t' || c == '\n' || c == '\r' || c >= 0x20 && c <= 0xD7FF || c >= 0xE000 && c <= 0xFFFD || c >= 0x10000 && c <= 0x10FFFF {
+			return c
+		}
+		return -1
+	}, s))
+}
+
+// feedLink is the visible link to a page's feed.
+func feedLink(feedPath string) string {
+	return ` <a class="feed-link" href="` + html.EscapeString(feedPath) + `" title="RSS feed of this page">RSS</a>`
+}
+
+// pageHeadWithFeed is pageHead plus the link feed readers look for.
+func pageHeadWithFeed(r *http.Request, title, feedPath string) string {
+	return strings.Replace(pageHead(r, title), "</head>", `<link rel="alternate" type="application/rss+xml" title="`+html.EscapeString(title)+`" href="`+html.EscapeString(feedPath)+`"></head>`, 1)
+}
+
+// writeFeed writes an RSS 2.0 feed of pins.
+func writeFeed(w http.ResponseWriter, r *http.Request, title, pagePath, desc string, items []searchResult) {
+	base := instanceBase(r)
+	var b strings.Builder
+	b.WriteString(`<?xml version="1.0" encoding="UTF-8"?>` + "\n" + `<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom"><channel>`)
+	b.WriteString(`<title>` + xmlText(title) + `</title><link>` + xmlText(base+pagePath) + `</link><description>` + xmlText(desc) + `</description>`)
+	b.WriteString(`<atom:link href="` + xmlText(base+r.URL.RequestURI()) + `" rel="self" type="application/rss+xml"/><ttl>60</ttl>`)
+	for i := range items {
+		it := &items[i]
+		full := fullImage(it.Images.Orig, it.Images.X736)
+		href := cardHref(it)
+		if !isPinimgURL(full.URL) || href == "" {
+			continue
+		}
+		thumb := it.Images.X474.URL
+		if !isPinimgURL(thumb) {
+			thumb = full.URL
+		}
+		name := firstNonEmpty(strings.TrimSpace(it.Title), strings.TrimSpace(it.GridTitle), truncateRunes(strings.TrimSpace(it.Description), 80), "Pin")
+		content := `<p><a href="` + html.EscapeString(base+href) + `"><img src="` + html.EscapeString(base+thumbURL(thumb, 474)) + `" alt="` + html.EscapeString(firstNonEmpty(it.AutoAltText, it.SeoAltText, name)) + `"></a></p>`
+		if d := strings.TrimSpace(it.Description); d != "" {
+			content += `<p>` + html.EscapeString(d) + `</p>`
+		}
+		b.WriteString(`<item><title>` + xmlText(name) + `</title><link>` + xmlText(base+href) + `</link><guid isPermaLink="false">` + xmlText(full.URL) + `</guid>`)
+		if t, err := time.Parse(time.RFC1123Z, it.CreatedAt); err == nil {
+			b.WriteString(`<pubDate>` + t.Format(time.RFC1123Z) + `</pubDate>`)
+		}
+		b.WriteString(`<description>` + xmlText(content) + `</description></item>`)
+	}
+	b.WriteString(`</channel></rss>`)
+	// application/xml, not application/rss+xml: browsers show it instead of
+	// downloading it (Firefox downloads rss+xml), and feed readers go by
+	// the content; pages still announce the feed as RSS.
+	w.Header().Set("Content-Type", "application/xml; charset=utf-8")
+	_, _ = io.WriteString(w, b.String())
+}
+
+// renderSearchFeed is renderSearchResults for ?format=rss: the same response,
+// as a feed.
+func renderSearchFeed(w http.ResponseWriter, r *http.Request, q, csrftoken, newCsrf string, body io.Reader, copyBody *bytes.Buffer) bool {
+	if copyBody != nil {
+		body = io.TeeReader(io.LimitReader(body, 8<<20), copyBody)
+	}
+	var resp struct {
+		ResourceResponse struct {
+			Data struct {
+				Results []searchResult `json:"results"`
+			} `json:"data"`
+		} `json:"resource_response"`
+	}
+	if err := json.NewDecoder(io.LimitReader(body, 8<<20)).Decode(&resp); err != nil {
+		log.Printf("search feed: unreadable response (decode error: %v)", err)
+		renderErrorPage(w, r, http.StatusBadGateway, "Pinterest sent a response Pinata couldn't read.")
+		return false
+	}
+	items := resp.ResourceResponse.Data.Results
+	writeFeed(w, r, `"`+q+`" - Pinata`, "/search?q="+url.QueryEscape(q), `Pinterest pins for "`+q+`", through Pinata.`, items)
+	return len(items) > 0
+}
+
 func setBookmarksCookie(w http.ResponseWriter, r *http.Request, entries []BookmarkEntry) {
 	if !bookmarkingEnabled {
 		return
@@ -932,7 +1041,7 @@ func gearLink(r *http.Request) string {
 }
 
 // ---------- CSS (uses CSS vars; defaults are present but overridden per-request via inline style) ----------
-const cssContent = `:root{--bg:#0b0f17;--muted:#94a3b8;--text:#e6e6ff;--accent:#7c3aed;--accent-rgba:rgba(124,58,237,0.12);--img-scale:1}*{box-sizing:border-box}html,body{height:100%}body{margin:0;padding:20px;background:linear-gradient(180deg,#071020 0%,var(--bg) 100%);color:var(--text);font-family:ui-monospace,Menlo,Monaco,monospace}a{color:inherit}.header{display:flex;gap:12px;align-items:center;margin-bottom:18px;flex-wrap:wrap}.brand{font-size:20px;font-weight:700;color:var(--accent);text-decoration:none}.search-box{margin-left:auto;display:flex;gap:8px;align-items:center;justify-content:flex-end;flex:0 1 auto}.gear{display:inline-flex;align-items:center;justify-content:center;flex:none;width:36px;height:36px;border-radius:8px;border:1px solid rgba(255,255,255,0.06);color:var(--muted);font-size:18px;text-decoration:none}.header>.gear{margin-left:auto}.gear:hover,.gear[aria-current]{color:var(--text);border-color:var(--accent)}.settings{max-width:560px;display:flex;flex-direction:column;gap:14px;margin-top:14px}.settings label{display:flex;justify-content:space-between;align-items:center;gap:12px;font-size:14px;color:var(--muted)}.settings h3{margin:18px 0 0;font-size:15px}.settings .note{font-size:13px;color:var(--muted);margin:0}.settings .export-form{flex-wrap:wrap}.search-block{width:100%;display:flex;gap:8px;margin-top:14px}.search-inline{display:flex;gap:8px;align-items:center;min-width:0}input[type="text"]{background:transparent;border:1px solid rgba(255,255,255,0.06);padding:8px 12px;color:var(--text);min-width:120px;border-radius:8px;outline:none}button[type="submit"],.btn-save{background:linear-gradient(90deg,var(--accent),#5b21b6);color:white;border:none;padding:8px 12px;border-radius:8px;cursor:pointer}.btn-save{font-weight:600}.img-container{column-width:calc(260px * var(--img-scale));column-gap:16px;width:100%;max-width:1400px;margin-top:18px}.card{display:inline-block;width:100%;margin:0 0 16px;border-radius:10px;overflow:hidden;background:linear-gradient(180deg,rgba(255,255,255,0.01),rgba(255,255,255,0.02));box-shadow:0 6px 18px rgba(3,7,18,0.6);border:1px solid rgba(124,58,237,0.06);break-inside:avoid;-webkit-column-break-inside:avoid;min-height:0;position:relative}.card a{text-decoration:none}.card img{display:block;width:100%;height:auto;object-fit:cover;background:#08101a;font-size:12px;line-height:1.4;overflow:hidden}.card-controls{position:absolute;top:8px;right:8px;display:flex;gap:8px;align-items:center}.btn-save-mini{background:rgba(0,0,0,0.45);border:1px solid rgba(255,255,255,0.06);color:var(--text);padding:6px;border-radius:999px;cursor:pointer;font-weight:700;display:inline-flex;align-items:center;justify-content:center;width:34px;height:34px;text-decoration:none}.magnifier{background:rgba(0,0,0,0.45);border:1px solid rgba(255,255,255,0.06);color:var(--text);padding:6px;border-radius:999px;font-size:14px;width:34px;height:34px;display:inline-flex;align-items:center;justify-content:center;text-decoration:none}.bookmarks{margin-left:12px;color:var(--muted);font-size:14px}.bookmark-list{margin-top:10px;display:flex;gap:8px;flex-wrap:wrap}.bookmark-pill{background:rgba(255,255,255,0.03);padding:6px 8px;border-radius:999px;border:1px solid rgba(255,255,255,0.04);font-size:13px;display:flex;gap:6px;align-items:center}.bookmark-pill form{display:inline}.bookmark-remove-btn{background:transparent;border:none;color:#ff7b7b;font-weight:700;cursor:pointer;padding:0 6px}.bm-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:10px;margin-top:12px;max-width:1100px}.bm-tile{position:relative;aspect-ratio:3/4;border-radius:10px;overflow:hidden;background:#08101a;border:1px solid rgba(255,255,255,0.04)}.bm-tile img{display:block;width:100%;height:100%;object-fit:cover;font-size:12px;color:var(--muted)}.bm-tile form{position:absolute;top:6px;right:6px;margin:0}.bm-tile .bookmark-remove-btn{width:28px;height:28px;padding:0;border-radius:999px;background:rgba(0,0,0,0.55)}.profile{display:flex;gap:16px;align-items:center;margin:8px 0 18px;flex-wrap:wrap}.profile img{width:96px;height:96px;border-radius:50%;object-fit:cover;background:#08101a}.profile h2{margin:0 0 4px}.profile .meta{color:var(--muted);font-size:14px}.board-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(calc(180px * var(--img-scale)),1fr));gap:16px;max-width:1400px}.board-tile{text-decoration:none;display:block}.board-tile img,.board-empty{display:block;width:100%;aspect-ratio:1;object-fit:cover;border-radius:10px;background:#08101a}.board-tile .name{font-weight:700;margin-top:6px}.board-tile .count{color:var(--muted);font-size:13px}.video-badge{position:absolute;left:8px;top:8px;width:30px;height:30px;border-radius:999px;background:rgba(0,0,0,0.6);color:#fff;font-size:13px;display:flex;align-items:center;justify-content:center;pointer-events:none}.pin-media video{display:block;max-width:100%;width:auto;height:auto;border-radius:10px;background:#08101a}.export-form{margin-top:12px;display:flex;gap:8px;align-items:center}.pagination{text-align:center;margin:26px 0}.pagination a{color:var(--accent);text-decoration:none;padding:8px 12px;border-radius:8px;border:1px solid rgba(124,58,237,0.12);background:rgba(124,58,237,0.02)}.footer-note{color:var(--muted);font-size:12px;margin-top:22px}.pin{display:flex;gap:24px;align-items:flex-start;flex-wrap:wrap;margin-top:18px}.pin-media{flex:0 1 auto;max-width:100%}.pin-media img{display:block;max-width:100%;width:auto;height:auto;border-radius:10px;background:#08101a;font-size:14px;overflow:hidden}@media (min-width:641px){.pin-media img,.pin-media video{max-height:85vh}}.pin-info{flex:1 1 280px;max-width:560px}.pin-info h2{margin:0 0 10px}.pin-desc{white-space:pre-line;margin:0 0 12px}.pin-meta{color:var(--muted);font-size:14px;line-height:1.7;margin:0 0 12px}.pin-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.save-frame{display:block;width:34px;height:34px;border:0;background:transparent;overflow:hidden}.save-frame-q{width:96px;height:36px;margin-left:8px}@media (max-width:640px){body{padding:12px;font-size:18px}.board-grid{grid-template-columns:repeat(auto-fill,minmax(calc(140px * var(--img-scale)),1fr));gap:12px}.brand{font-size:22px}input[type="text"]{min-width:120px;padding:12px 14px;font-size:16px}button[type="submit"],.btn-save{padding:10px 14px;font-size:16px;border-radius:10px}.img-container{column-width:calc(180px * var(--img-scale));column-gap:12px}.search-block{gap:10px;flex-direction:column}.search-inline{width:100%}.search-box{margin-left:0;width:100%}.bookmarks{order:3;width:100%;margin-top:8px}}`
+const cssContent = `:root{--bg:#0b0f17;--muted:#94a3b8;--text:#e6e6ff;--accent:#7c3aed;--accent-rgba:rgba(124,58,237,0.12);--img-scale:1}*{box-sizing:border-box}html,body{height:100%}body{margin:0;padding:20px;background:linear-gradient(180deg,#071020 0%,var(--bg) 100%);color:var(--text);font-family:ui-monospace,Menlo,Monaco,monospace}a{color:inherit}.header{display:flex;gap:12px;align-items:center;margin-bottom:18px;flex-wrap:wrap}.brand{font-size:20px;font-weight:700;color:var(--accent);text-decoration:none}.search-box{margin-left:auto;display:flex;gap:8px;align-items:center;justify-content:flex-end;flex:0 1 auto}.gear{display:inline-flex;align-items:center;justify-content:center;flex:none;width:36px;height:36px;border-radius:8px;border:1px solid rgba(255,255,255,0.06);color:var(--muted);font-size:18px;text-decoration:none}.header>.gear{margin-left:auto}.gear:hover,.gear[aria-current]{color:var(--text);border-color:var(--accent)}.settings{max-width:560px;display:flex;flex-direction:column;gap:14px;margin-top:14px}.settings label{display:flex;justify-content:space-between;align-items:center;gap:12px;font-size:14px;color:var(--muted)}.settings h3{margin:18px 0 0;font-size:15px}.settings .note{font-size:13px;color:var(--muted);margin:0}.settings .export-form{flex-wrap:wrap}.search-block{width:100%;display:flex;gap:8px;margin-top:14px}.search-inline{display:flex;gap:8px;align-items:center;min-width:0}input[type="text"]{background:transparent;border:1px solid rgba(255,255,255,0.06);padding:8px 12px;color:var(--text);min-width:120px;border-radius:8px;outline:none}button[type="submit"],.btn-save{background:linear-gradient(90deg,var(--accent),#5b21b6);color:white;border:none;padding:8px 12px;border-radius:8px;cursor:pointer}.btn-save{font-weight:600}.img-container{column-width:calc(260px * var(--img-scale));column-gap:16px;width:100%;max-width:1400px;margin-top:18px}.card{display:inline-block;width:100%;margin:0 0 16px;border-radius:10px;overflow:hidden;background:linear-gradient(180deg,rgba(255,255,255,0.01),rgba(255,255,255,0.02));box-shadow:0 6px 18px rgba(3,7,18,0.6);border:1px solid rgba(124,58,237,0.06);break-inside:avoid;-webkit-column-break-inside:avoid;min-height:0;position:relative}.card a{text-decoration:none}.card img{display:block;width:100%;height:auto;object-fit:cover;background:#08101a;font-size:12px;line-height:1.4;overflow:hidden}.card-controls{position:absolute;top:8px;right:8px;display:flex;gap:8px;align-items:center}.btn-save-mini{background:rgba(0,0,0,0.45);border:1px solid rgba(255,255,255,0.06);color:var(--text);padding:6px;border-radius:999px;cursor:pointer;font-weight:700;display:inline-flex;align-items:center;justify-content:center;width:34px;height:34px;text-decoration:none}.magnifier{background:rgba(0,0,0,0.45);border:1px solid rgba(255,255,255,0.06);color:var(--text);padding:6px;border-radius:999px;font-size:14px;width:34px;height:34px;display:inline-flex;align-items:center;justify-content:center;text-decoration:none}.bookmarks{margin-left:12px;color:var(--muted);font-size:14px}.bookmark-list{margin-top:10px;display:flex;gap:8px;flex-wrap:wrap}.bookmark-pill{background:rgba(255,255,255,0.03);padding:6px 8px;border-radius:999px;border:1px solid rgba(255,255,255,0.04);font-size:13px;display:flex;gap:6px;align-items:center}.bookmark-pill form{display:inline}.bookmark-remove-btn{background:transparent;border:none;color:#ff7b7b;font-weight:700;cursor:pointer;padding:0 6px}.bm-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:10px;margin-top:12px;max-width:1100px}.bm-tile{position:relative;aspect-ratio:3/4;border-radius:10px;overflow:hidden;background:#08101a;border:1px solid rgba(255,255,255,0.04)}.bm-tile img{display:block;width:100%;height:100%;object-fit:cover;font-size:12px;color:var(--muted)}.bm-tile form{position:absolute;top:6px;right:6px;margin:0}.bm-tile .bookmark-remove-btn{width:28px;height:28px;padding:0;border-radius:999px;background:rgba(0,0,0,0.55)}.profile{display:flex;gap:16px;align-items:center;margin:8px 0 18px;flex-wrap:wrap}.profile img{width:96px;height:96px;border-radius:50%;object-fit:cover;background:#08101a}.profile h2{margin:0 0 4px}.profile .meta{color:var(--muted);font-size:14px}.board-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(calc(180px * var(--img-scale)),1fr));gap:16px;max-width:1400px}.board-tile{text-decoration:none;display:block}.board-tile img,.board-empty{display:block;width:100%;aspect-ratio:1;object-fit:cover;border-radius:10px;background:#08101a}.board-tile .name{font-weight:700;margin-top:6px}.board-tile .count{color:var(--muted);font-size:13px}.feed-link{font-size:13px;font-weight:normal;margin-left:6px;vertical-align:middle}.video-badge{position:absolute;left:8px;top:8px;width:30px;height:30px;border-radius:999px;background:rgba(0,0,0,0.6);color:#fff;font-size:13px;display:flex;align-items:center;justify-content:center;pointer-events:none}.pin-media video{display:block;max-width:100%;width:auto;height:auto;border-radius:10px;background:#08101a}.export-form{margin-top:12px;display:flex;gap:8px;align-items:center}.pagination{text-align:center;margin:26px 0}.pagination a{color:var(--accent);text-decoration:none;padding:8px 12px;border-radius:8px;border:1px solid rgba(124,58,237,0.12);background:rgba(124,58,237,0.02)}.footer-note{color:var(--muted);font-size:12px;margin-top:22px}.pin{display:flex;gap:24px;align-items:flex-start;flex-wrap:wrap;margin-top:18px}.pin-media{flex:0 1 auto;max-width:100%}.pin-media img{display:block;max-width:100%;width:auto;height:auto;border-radius:10px;background:#08101a;font-size:14px;overflow:hidden}@media (min-width:641px){.pin-media img,.pin-media video{max-height:85vh}}.pin-info{flex:1 1 280px;max-width:560px}.pin-info h2{margin:0 0 10px}.pin-desc{white-space:pre-line;margin:0 0 12px}.pin-meta{color:var(--muted);font-size:14px;line-height:1.7;margin:0 0 12px}.pin-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.save-frame{display:block;width:34px;height:34px;border:0;background:transparent;overflow:hidden}.save-frame-q{width:96px;height:36px;margin-left:8px}@media (max-width:640px){body{padding:12px;font-size:18px}.board-grid{grid-template-columns:repeat(auto-fill,minmax(calc(140px * var(--img-scale)),1fr));gap:12px}.brand{font-size:22px}input[type="text"]{min-width:120px;padding:12px 14px;font-size:16px}button[type="submit"],.btn-save{padding:10px 14px;font-size:16px;border-radius:10px}.img-container{column-width:calc(180px * var(--img-scale));column-gap:12px}.search-block{gap:10px;flex-direction:column}.search-inline{width:100%}.search-box{margin-left:0;width:100%}.bookmarks{order:3;width:100%;margin-top:8px}}`
 
 // ---------- handlers ----------
 
@@ -1720,7 +1829,7 @@ func boardPage(w http.ResponseWriter, r *http.Request, user, slug string) {
 		boardURL = "/" + user + "/" + url.PathEscape(slug) + "/"
 	}
 	bookmark := r.URL.Query().Get("bookmark")
-	if len(bookmark) > 2048 {
+	if len(bookmark) > 2048 || wantsFeed(r) { // feeds are a board's first page
 		bookmark = ""
 	}
 	before, _ := strconv.Atoi(r.URL.Query().Get("n")) // pins on earlier pages
@@ -1749,14 +1858,25 @@ func boardPage(w http.ResponseWriter, r *http.Request, user, slug string) {
 		owner, ownerName = bd.Owner.Username, firstNonEmpty(bd.Owner.FullName, bd.Owner.Username)
 	}
 	name := firstNonEmpty(bd.Name, slugWords(slug))
+	if wantsFeed(r) {
+		var pins []searchResult
+		for _, it := range items {
+			var res searchResult
+			if json.Unmarshal(it, &res) == nil {
+				pins = append(pins, res)
+			}
+		}
+		writeFeed(w, r, name+" - Pinata", boardURL, "Pins of the Pinterest board "+name+" by "+ownerName+", through Pinata.", pins)
+		return
+	}
 	_, imgScale := getThemeVars(r)
 	thumbMobile, thumbDesktop, thumbHigh := thumbWidths(imgScale)
 	st := newPageState(r)
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	_, _ = io.WriteString(w, pageHead(r, name+" - Pinata"))
+	_, _ = io.WriteString(w, pageHeadWithFeed(r, name+" - Pinata", boardURL+"?format=rss"))
 	_, _ = io.WriteString(w, headerWithSearch(r))
-	_, _ = io.WriteString(w, `<h2 style="margin:4px 0 0 0;">`+html.EscapeString(name)+`</h2><div class="pin-meta" style="margin:4px 0 0">Board by <a href="/`+html.EscapeString(owner)+`/">`+html.EscapeString(ownerName)+`</a> · `+plural(bd.PinCount, "pin", "pins")+`</div>`)
+	_, _ = io.WriteString(w, `<h2 style="margin:4px 0 0 0;">`+html.EscapeString(name)+feedLink(boardURL+"?format=rss")+`</h2><div class="pin-meta" style="margin:4px 0 0">Board by <a href="/`+html.EscapeString(owner)+`/">`+html.EscapeString(ownerName)+`</a> · `+plural(bd.PinCount, "pin", "pins")+`</div>`)
 	if desc := strings.TrimSpace(bd.Description); desc != "" {
 		_, _ = io.WriteString(w, `<p class="pin-desc">`+html.EscapeString(desc)+`</p>`)
 	}
@@ -1954,6 +2074,10 @@ func searchHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	bookmark := r.URL.Query().Get("bookmark")
 	csrftoken := r.URL.Query().Get("csrftoken")
+	render := renderSearchResults
+	if wantsFeed(r) {
+		render, bookmark, csrftoken = renderSearchFeed, "", "" // feeds are a search's first page
+	}
 
 	dataObj := map[string]any{"options": map[string]any{"query": q}}
 	if bookmark != "" {
@@ -1970,7 +2094,7 @@ func searchHandler(w http.ResponseWriter, r *http.Request) {
 	if e, ok := apiCache.open(cacheKey, searchTTL); ok {
 		defer e.Close()
 		w.Header().Set("X-Pinata-Cache", "hit")
-		renderSearchResults(w, r, q, csrftoken, e.Meta["csrf"], e.Body, nil)
+		render(w, r, q, csrftoken, e.Meta["csrf"], e.Body, nil)
 		return
 	}
 
@@ -2016,7 +2140,7 @@ func searchHandler(w http.ResponseWriter, r *http.Request) {
 	if apiCache != nil {
 		copyBody = &bytes.Buffer{}
 	}
-	if renderSearchResults(w, r, q, csrftoken, newCsrf, resp.Body, copyBody) && copyBody != nil {
+	if render(w, r, q, csrftoken, newCsrf, resp.Body, copyBody) && copyBody != nil {
 		apiCache.put(cacheKey, map[string]string{"csrf": newCsrf}, copyBody.Bytes())
 	}
 }
@@ -2034,7 +2158,8 @@ func renderSearchResults(w http.ResponseWriter, r *http.Request, q, csrftoken, n
 
 	// Start streaming HTML
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	_, _ = io.WriteString(w, pageHead(r, q+" - Pinata"))
+	searchFeed := "/search?q=" + url.QueryEscape(q) + "&format=rss"
+	_, _ = io.WriteString(w, pageHeadWithFeed(r, q+" - Pinata", searchFeed))
 	// header: inline search and Save-search form
 	_, _ = io.WriteString(w, `<div class="header" style="margin-bottom:8px;"><a class="brand" href="/">Pinata</a><div class="search-box">`)
 	_, _ = io.WriteString(w, `<form class="search-inline" method="get" action="/search"><input type="text" name="q" value="`+html.EscapeString(q)+`" maxlength="64"><button type="submit">Search</button></form>`)
@@ -2043,7 +2168,7 @@ func renderSearchResults(w http.ResponseWriter, r *http.Request, q, csrftoken, n
 		_, _ = io.WriteString(w, saveFrameTag(st, "q", q, ""))
 	}
 	_, _ = io.WriteString(w, gearLink(r)+`</div></div>`)
-	_, _ = io.WriteString(w, `<h2 style="margin:4px 0 0 0;">Results for "`+html.EscapeString(q)+`"</h2>`)
+	_, _ = io.WriteString(w, `<h2 style="margin:4px 0 0 0;">Results for "`+html.EscapeString(q)+`"`+feedLink(searchFeed)+`</h2>`)
 	_, _ = io.WriteString(w, `<div class="img-container">`)
 
 	dec := json.NewDecoder(body)
